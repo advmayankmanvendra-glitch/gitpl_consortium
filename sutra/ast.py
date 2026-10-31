@@ -1,16 +1,21 @@
 """AST node definition.
 
-Every node is a ``Node`` with a ``kind`` string and keyword attributes. The
+Every node is a ``Node`` with a ``kind`` string, a source position and keyword
+attributes. The
 interpreter dispatches on ``kind`` (``exec_<kind>`` / ``eval_<kind>``).
 """
 
 
 class Node:
-    __slots__ = ("kind", "line", "attrs")
+    __slots__ = ("kind", "line", "col", "length", "attrs")
 
-    def __init__(self, kind, line, **attrs):
+    def __init__(self, kind, pos, **attrs):
+        """``pos`` is a token or node to take the position from, or a bare line number."""
         self.kind = kind
-        self.line = line
+        if isinstance(pos, int):
+            self.line, self.col, self.length = pos, None, None
+        else:
+            self.line, self.col, self.length = pos.line, pos.col, getattr(pos, "length", None)
         self.attrs = attrs
 
     def __getattr__(self, name):

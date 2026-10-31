@@ -126,7 +126,10 @@ class AnthropicModel(Model):
     def complete(self, system, messages, tools=None, schema=None):
         api_key = self.api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
-            raise ModelError("ANTHROPIC_API_KEY is not set (or use the offline model with: use \"mock\")")
+            raise ModelError(
+                "ANTHROPIC_API_KEY is not set",
+                hint='export ANTHROPIC_API_KEY=..., or run offline with: use "mock"',
+            )
         body = {"model": self.model, "max_tokens": self.max_tokens, "messages": messages}
         if system:
             body["system"] = system
@@ -149,9 +152,21 @@ class AnthropicModel(Model):
                 data = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")
-            raise ModelError(f"Anthropic API error {exc.code}: {detail}") from None
+            try:
+                detail = json.loads(detail)["error"]["message"]
+            except (ValueError, KeyError, TypeError):
+                pass
+            hints = {
+                401: "check that ANTHROPIC_API_KEY is valid",
+                404: f"check the model name '{self.model}'",
+                429: "you are being rate limited; wait a moment and try again",
+                529: "the API is overloaded; try again shortly",
+            }
+            raise ModelError(f"Anthropic API error {exc.code}: {detail}", hint=hints.get(exc.code)) from None
         except urllib.error.URLError as exc:
-            raise ModelError(f"could not reach the Anthropic API: {exc.reason}") from None
+            raise ModelError(
+                f"could not reach the Anthropic API: {exc.reason}", hint="check your network connection"
+            ) from None
 
         blocks = data.get("content", [])
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
@@ -173,7 +188,7 @@ def make_model(spec, options=None):
         return AnthropicModel(name or DEFAULT_ANTHROPIC_MODEL, **_anthropic_options(options))
     if spec.startswith("claude-"):
         return AnthropicModel(spec, **_anthropic_options(options))
-    raise ModelError(f"unknown model '{spec}' (try \"mock\" or \"anthropic:{DEFAULT_ANTHROPIC_MODEL}\")")
+    raise ModelError(f"unknown model '{spec}'", hint=f'try "mock" or "anthropic:{DEFAULT_ANTHROPIC_MODEL}"')
 
 
 def _anthropic_options(options):

@@ -1,11 +1,13 @@
 """Tree-walking interpreter for Sutra."""
 
+import inspect
 import json
 import os
 import sys
 
 from . import builtins as builtin_module
-from .errors import ModelError, SutraError, SutraRuntimeError
+from .errors import ModelError, SutraError, SutraRuntimeError, did_you_mean
+from .lexer import KEYWORDS
 from .models import Model, make_model
 from .parser import parse
 from .types import AnyType, SType, StrType, ValidationError, build_type
@@ -31,12 +33,22 @@ class ContinueSignal(Exception):
 class ThrownError(SutraRuntimeError):
     """An error raised by a Sutra `throw` statement; carries the thrown value."""
 
-    def __init__(self, value, line):
+    def __init__(self, value, pos):
         self.value = value
-        super().__init__(to_str(value), line)
+        super().__init__(to_str(value), pos, hint="catch it with try { ... } catch err { ... }")
 
 
 # ------------------------------------------------------------------ environment
+# Names people reach for from other languages, with the Sutra equivalent.
+FOREIGN_NAMES = {
+    "null": "none", "nil": "none", "None": "none", "undefined": "none",
+    "True": "true", "False": "false", "TRUE": "true", "FALSE": "false",
+    "length": "len", "size": "len", "append": "push", "console": "print",
+    "puts": "print", "echo": "print", "printf": "print", "println": "print",
+    "input": "read", "lambda": "fn",
+}
+
+
 class Environment:
     def __init__(self, parent=None):
         self.vars = {}
@@ -45,22 +57,37 @@ class Environment:
     def define(self, name, value):
         self.vars[name] = value
 
-    def lookup(self, name, line=None):
+    def names(self):
+        """Every name visible from this scope."""
+        seen = set()
+        env = self
+        while env is not None:
+            seen.update(env.vars)
+            env = env.parent
+        return seen
+
+    def lookup(self, name, pos=None):
         env = self
         while env is not None:
             if name in env.vars:
                 return env.vars[name]
             env = env.parent
-        raise SutraRuntimeError(f"'{name}' is not defined", line)
+        if name in FOREIGN_NAMES:
+            hint = f"Sutra spells this '{FOREIGN_NAMES[name]}'"
+        else:
+            hint = did_you_mean(name, self.names() | KEYWORDS)
+        raise SutraRuntimeError(f"'{name}' is not defined", pos, hint=hint)
 
-    def assign(self, name, value, line=None):
+    def assign(self, name, value, pos=None):
         env = self
         while env is not None:
             if name in env.vars:
                 env.vars[name] = value
                 return
             env = env.parent
-        raise SutraRuntimeError(f"'{name}' is not defined (use 'let {name} = ...' to create it)", line)
+        close = did_you_mean(name, self.names())
+        hint = f"{close} To create a new variable, write 'let {name} = ...'" if close else f"create it first with 'let {name} = ...'"
+        raise SutraRuntimeError(f"'{name}' is not defined", pos, hint=hint)
 
 
 # ------------------------------------------------------------------ values
@@ -280,13 +307,12 @@ class Interpreter:
         try:
             return handler(node, env)
         except SutraError as exc:
-            if exc.line is None:
-                exc.line = node.line
+            exc.locate(node)
             raise
         except (ReturnSignal, BreakSignal, ContinueSignal):
             raise
         except RecursionError:
-            raise SutraRuntimeError("maximum recursion depth exceeded", node.line) from None
+            raise SutraRuntimeError("maximum recursion depth exceeded", node) from None
 
     def exec_ExprStmt(self, node, env):
         return self.evaluate(node.expr, env)
@@ -299,23 +325,23 @@ class Interpreter:
         target = node.target
         if node.op != "=":
             current = self.evaluate(target, env)
-            value = self.binary("+" if node.op == "+=" else "-", current, value, node.line)
+            value = self.binary("+" if node.op == "+=" else "-", current, value, node)
         if target.kind == "Name":
-            env.assign(target.name, value, node.line)
+            env.assign(target.name, value, node)
         elif target.kind == "Index":
             obj = self.evaluate(target.obj, env)
             index = self.evaluate(target.index, env)
             if isinstance(obj, list):
-                self.check_list_index(obj, index, node.line)
+                self.check_list_index(obj, index, node)
                 obj[int(index)] = value
             elif isinstance(obj, dict):
                 obj[index] = value
             else:
-                raise SutraRuntimeError(f"cannot assign into a {type_name(obj)}", node.line)
+                raise SutraRuntimeError(f"cannot assign into a {type_name(obj)}", node)
         else:
             obj = self.evaluate(target.obj, env)
             if not isinstance(obj, dict):
-                raise SutraRuntimeError(f"cannot set field on a {type_name(obj)}", node.line)
+                raise SutraRuntimeError(f"cannot set field on a {type_name(obj)}", node)
             obj[target.name] = value
 
     def exec_FnDecl(self, node, env):
@@ -326,7 +352,7 @@ class Interpreter:
 
     def exec_ToolDecl(self, node, env):
         description = to_str(self.evaluate(node.description, env)) if node.description else None
-        lookup = lambda name: env.lookup(name, node.line)  # noqa: E731
+        lookup = lambda name: env.lookup(name, node)  # noqa: E731
         types = {p.name: build_type(p.type, lookup) if p.type else AnyType() for p in node.params}
         env.define(node.name, Tool(node.name, node.params, node.body, env, description, types))
 
@@ -334,10 +360,10 @@ class Interpreter:
         config = {key: self.evaluate(value, env) for key, value in node.entries}
         unknown = set(config) - {"model", "system", "tools", "max_steps", "trace"}
         if unknown:
-            raise SutraRuntimeError(f"unknown agent setting(s): {', '.join(sorted(unknown))}", node.line)
+            raise SutraRuntimeError(f"unknown agent setting(s): {', '.join(sorted(unknown))}", node)
         tools = config.get("tools", [])
         if not isinstance(tools, list) or not all(isinstance(t, Tool) for t in tools):
-            raise SutraRuntimeError("agent 'tools' must be a list of tools declared with 'tool'", node.line)
+            raise SutraRuntimeError("agent 'tools' must be a list of tools declared with 'tool'", node)
         model = config.get("model")
         agent = Agent(
             node.name,
@@ -352,7 +378,7 @@ class Interpreter:
     def exec_TypeDecl(self, node, env):
         from .types import NamedType
 
-        inner = build_type(node.type, lambda name: env.lookup(name, node.line))
+        inner = build_type(node.type, lambda name: env.lookup(name, node))
         env.define(node.name, NamedType(node.name, inner))
 
     def exec_Use(self, node, env):
@@ -381,7 +407,7 @@ class Interpreter:
         elif isinstance(iterable, (list, str)):
             items = list(enumerate(iterable)) if len(node.names) == 2 else list(iterable)
         else:
-            raise SutraRuntimeError(f"cannot loop over a {type_name(iterable)}", node.line)
+            raise SutraRuntimeError(f"cannot loop over a {type_name(iterable)}", node)
         for item in items:
             scope = Environment(env)
             if len(node.names) == 2:
@@ -406,7 +432,7 @@ class Interpreter:
         raise ContinueSignal()
 
     def exec_Throw(self, node, env):
-        raise ThrownError(self.evaluate(node.value, env), node.line)
+        raise ThrownError(self.evaluate(node.value, env), node)
 
     def exec_Try(self, node, env):
         try:
@@ -418,7 +444,11 @@ class Interpreter:
 
     # ---- expressions
     def evaluate(self, node, env):
-        return getattr(self, f"eval_{node.kind}")(node, env)
+        try:
+            return getattr(self, f"eval_{node.kind}")(node, env)
+        except SutraError as exc:
+            exc.locate(node)
+            raise
 
     def eval_Literal(self, node, env):
         return node.value
@@ -427,7 +457,7 @@ class Interpreter:
         return "".join(p if isinstance(p, str) else to_str(self.evaluate(p, env)) for p in node.parts)
 
     def eval_Name(self, node, env):
-        return env.lookup(node.name, node.line)
+        return env.lookup(node.name, node)
 
     def eval_List(self, node, env):
         return [self.evaluate(item, env) for item in node.items]
@@ -443,7 +473,7 @@ class Interpreter:
         if node.op == "not":
             return not truthy(value)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise SutraRuntimeError(f"cannot negate a {type_name(value)}", node.line)
+            raise SutraRuntimeError(f"cannot negate a {type_name(value)}", node, hint=conversion_hint(value))
         return -value
 
     def eval_Logical(self, node, env):
@@ -453,7 +483,7 @@ class Interpreter:
         return left if truthy(left) else self.evaluate(node.right, env)
 
     def eval_Binary(self, node, env):
-        return self.binary(node.op, self.evaluate(node.left, env), self.evaluate(node.right, env), node.line)
+        return self.binary(node.op, self.evaluate(node.left, env), self.evaluate(node.right, env), node)
 
     def binary(self, op, left, right, line):
         is_num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)  # noqa: E731
@@ -491,7 +521,12 @@ class Interpreter:
             if isinstance(right, (list, dict)) or (isinstance(right, str) and isinstance(left, str)):
                 result = left in right
                 return result if op == "in" else not result
-        raise SutraRuntimeError(f"cannot apply '{op}' to {type_name(left)} and {type_name(right)}", line)
+        hint = None
+        if op in ("-", "*", "/", "%", "<", ">", "<=", ">="):
+            hint = conversion_hint(left) or conversion_hint(right)
+        if op in ("in", "not in"):
+            hint = "'in' works on lists, maps and strings"
+        raise SutraRuntimeError(f"cannot apply '{op}' to {type_name(left)} and {type_name(right)}", line, hint=hint)
 
     @staticmethod
     def check_list_index(obj, index, line):
@@ -504,19 +539,23 @@ class Interpreter:
         obj = self.evaluate(node.obj, env)
         index = self.evaluate(node.index, env)
         if isinstance(obj, (list, str)):
-            self.check_list_index(obj, index, node.line)
+            self.check_list_index(obj, index, node)
             return obj[index]
         if isinstance(obj, dict):
             if index not in obj:
-                raise SutraRuntimeError(f"key {to_str(index)!r} not found", node.line)
+                raise SutraRuntimeError(
+                    f"key {to_str(index)!r} not found", node, hint=missing_key_hint(index, obj)
+                )
             return obj[index]
-        raise SutraRuntimeError(f"cannot index a {type_name(obj)}", node.line)
+        raise SutraRuntimeError(f"cannot index a {type_name(obj)}", node)
 
     def eval_Member(self, node, env):
         obj = self.evaluate(node.obj, env)
         if isinstance(obj, dict):
             if node.name not in obj:
-                raise SutraRuntimeError(f"field '{node.name}' not found", node.line)
+                raise SutraRuntimeError(
+                    f"field '{node.name}' not found", node, hint=missing_key_hint(node.name, obj)
+                )
             return obj[node.name]
         if isinstance(obj, PromptValue):
             if node.name == "text":
@@ -527,35 +566,53 @@ class Interpreter:
                 return [dict(m) for m in obj.messages]
         if isinstance(obj, (Function, PromptTemplate, Agent)) and node.name == "name":
             return obj.name
-        raise SutraRuntimeError(f"a {type_name(obj)} has no field '{node.name}'", node.line)
+        hint = None
+        if node.name in builtin_module.BUILTINS:
+            hint = f"'{node.name}' is a function: write {node.name}(...) instead of .{node.name}"
+        elif node.name in FOREIGN_NAMES and FOREIGN_NAMES[node.name] in builtin_module.BUILTINS:
+            fn = FOREIGN_NAMES[node.name]
+            hint = f"use the {fn}() function instead"
+        raise SutraRuntimeError(f"a {type_name(obj)} has no field '{node.name}'", node, hint=hint)
 
     def eval_Call(self, node, env):
         callee = self.evaluate(node.callee, env)
         args = [self.evaluate(a, env) for a in node.args]
         kwargs = {name: self.evaluate(value, env) for name, value in node.kwargs}
-        return self.call(callee, args, kwargs, node.line)
+        return self.call(callee, args, kwargs, node)
+
+    @staticmethod
+    def signature(name, params):
+        parts = []
+        for p in params:
+            parts.append(p.name if p.default is None else f"{p.name}=...")
+        return f"{name}({', '.join(parts)})"
 
     def eval_Ask(self, node, env):
         target = self.evaluate(node.prompt, env)
         model = self.resolve_model(self.evaluate(node.model, env) if node.model is not None else None)
         out_type = None
         if node.type is not None:
-            out_type = build_type(node.type, lambda name: env.lookup(name, node.line))
+            out_type = build_type(node.type, lambda name: env.lookup(name, node))
         if isinstance(target, PromptValue):
             system, messages = target.system, [dict(m) for m in target.messages]
         else:
             system, messages = None, [{"role": "user", "content": to_str(target)}]
-        return self.ask(model, system, messages, out_type, node.line)
+        return self.ask(model, system, messages, out_type, node)
 
     # ---- calling
     def bind(self, params, args, kwargs, closure, name, line, types=None):
+        usage = f"usage: {self.signature(name, params)}"
         if len(args) > len(params):
-            raise SutraRuntimeError(f"{name}() takes {len(params)} argument(s) but got {len(args)}", line)
+            raise SutraRuntimeError(
+                f"{name}() takes {len(params)} argument(s) but got {len(args)}", line, hint=usage
+            )
         scope = Environment(closure)
         names = {p.name for p in params}
         for key in kwargs:
             if key not in names:
-                raise SutraRuntimeError(f"{name}() has no parameter '{key}'", line)
+                raise SutraRuntimeError(
+                    f"{name}() has no parameter '{key}'", line, hint=did_you_mean(key, names) or usage
+                )
         for i, param in enumerate(params):
             if i < len(args):
                 if param.name in kwargs:
@@ -566,7 +623,7 @@ class Interpreter:
             elif param.default is not None:
                 value = self.evaluate(param.default, scope)
             else:
-                raise SutraRuntimeError(f"{name}() is missing argument '{param.name}'", line)
+                raise SutraRuntimeError(f"{name}() is missing argument '{param.name}'", line, hint=usage)
             if types is not None:
                 try:
                     value = types[param.name].validate(value, param.name)
@@ -577,14 +634,7 @@ class Interpreter:
 
     def call(self, callee, args, kwargs, line=None):
         if isinstance(callee, Builtin):
-            try:
-                return callee.fn(self, *args, **kwargs)
-            except SutraError:
-                raise
-            except TypeError as exc:
-                raise SutraRuntimeError(f"{callee.name}(): {exc}", line) from None
-            except (ValueError, KeyError, IndexError, OSError) as exc:
-                raise SutraRuntimeError(f"{callee.name}(): {exc}", line) from None
+            return self.call_builtin(callee, args, kwargs, line)
         if isinstance(callee, Function):
             types = callee.param_types if isinstance(callee, Tool) else None
             scope = self.bind(callee.params, args, kwargs, callee.closure, callee.name, line, types)
@@ -592,6 +642,9 @@ class Interpreter:
                 self.execute_block(callee.body, scope)
             except ReturnSignal as signal:
                 return signal.value
+            except SutraError as exc:
+                exc.frames.append((callee.name, line))
+                raise
             return None
         if isinstance(callee, PromptTemplate):
             scope = self.bind(callee.params, args, kwargs, callee.closure, callee.name, line)
@@ -608,7 +661,41 @@ class Interpreter:
             if kwargs or len(args) != 1:
                 raise SutraRuntimeError(f"agent {callee.name} takes exactly one task argument", line)
             return self.run_agent(callee, args[0], line)
-        raise SutraRuntimeError(f"a {type_name(callee)} is not callable", line)
+        raise SutraRuntimeError(
+            f"a {type_name(callee)} is not callable",
+            line,
+            hint="only functions, prompts, tools, agents and built-ins can be called",
+        )
+
+    def call_builtin(self, callee, args, kwargs, line):
+        try:
+            sig = inspect.signature(callee.fn)
+        except (TypeError, ValueError):  # pragma: no cover - every builtin is a plain function
+            sig = None
+        if sig is not None:
+            params = list(sig.parameters.values())[1:]  # drop the interpreter argument
+            usage = "usage: {}({})".format(
+                callee.name,
+                ", ".join(
+                    ("..." + p.name if p.kind is p.VAR_POSITIONAL else p.name)
+                    + ("" if p.default is p.empty else "=...")
+                    for p in params
+                ),
+            )
+            try:
+                sig.bind(self, *args, **kwargs)
+            except TypeError as exc:
+                detail = str(exc).replace("positional ", "").replace("keyword ", "")
+                raise SutraRuntimeError(f"{callee.name}(): {detail}", line, hint=usage) from None
+        try:
+            return callee.fn(self, *args, **kwargs)
+        except SutraError:
+            raise
+        except (TypeError, AttributeError):
+            kinds = ", ".join(type_name(a) for a in list(args) + list(kwargs.values())) or "no arguments"
+            raise SutraRuntimeError(f"{callee.name}() can't handle ({kinds})", line) from None
+        except (ValueError, KeyError, IndexError, OSError) as exc:
+            raise SutraRuntimeError(f"{callee.name}(): {exc}", line) from None
 
     # ---- AI operations
     def ask(self, model, system, messages, out_type, line):
@@ -680,6 +767,25 @@ class Interpreter:
                 results.append(block)
             messages.append({"role": "user", "content": results})
         raise ModelError(f"agent {agent.name} did not finish within {agent.max_steps} steps", line)
+
+
+def conversion_hint(value):
+    if isinstance(value, str):
+        return "convert text to a number with num(...)"
+    if value is None:
+        return "a value here is none; check that it was set"
+    return None
+
+
+def missing_key_hint(key, mapping):
+    keys = [str(k) for k in mapping]
+    close = did_you_mean(str(key), keys)
+    if close:
+        return close
+    if not keys:
+        return "the map is empty"
+    shown = ", ".join(keys[:8]) + (", ..." if len(keys) > 8 else "")
+    return f"available keys: {shown}"
 
 
 def run_source(source, out=None, model=None):
