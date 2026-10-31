@@ -70,7 +70,16 @@ print(v.decision, v.margin, v.votes, v.dissent, v.abstained)
 A member that errors or `abstain`s does not vote. Members get their own copies of the
 arguments, so none can change what another one sees.
 
-## Run it
+## Try it in your browser
+
+**[Open the Gatbandhan Playground](https://claude.ai/artifact/PmbX4ECXY1Axa4LnCTgAM3)**: write a program, press Run,
+and answer as the human partner. Nothing to install. The playground lives in
+[playground/](playground/) and runs on [playground/gatbandhan.js](playground/gatbandhan.js), a JavaScript port
+of the interpreter. To host it yourself, serve the `playground/` folder from any static web host, such as
+GitHub Pages. In the browser, a bond's `keep:` memory is saved in the browser's own storage, and models can
+only be scripted ones.
+
+## Run it with Python
 
 Requires Python 3.10 or newer. No dependencies.
 
@@ -78,7 +87,8 @@ Requires Python 3.10 or newer. No dependencies.
 cd gatbandhan
 PYTHONPATH=src python -m gatbandhan examples/first_bond.gbn
 PYTHONPATH=src python -m gatbandhan            # interactive prompt
-python -m unittest discover -s tests            # tests
+python -m unittest discover -s tests            # Python tests
+node playground/test.js                         # JavaScript tests (Node 18+)
 ```
 
 Or install it with `pip install -e gatbandhan` and run `gatbandhan file.gbn`.
@@ -110,6 +120,8 @@ before it and a changed or missing entry is detected the next time the bond is o
 
 ## Roadmap
 
-1. **Python** (this version): the reference interpreter, where ideas get shaped.
-2. **JavaScript**: a port that runs in the browser, for an online playground.
+1. **Python**: the reference interpreter, where ideas get shaped. Done.
+2. **JavaScript**: a port that runs in the browser, with the playground. Done. Both
+   interpreters are checked against the same shared cases (`tests/parity.json`), so they
+   give identical output.
 3. **TypeScript**: once the design settles, a typed implementation to build on.

@@ -1,0 +1,26 @@
+# A bond that remembers. `keep:` saves its memory in this browser,
+# so every time you press Run, the same bond continues.
+
+member saathi(q) { return "yes" with feeling "glad" }
+
+bond ours {
+  human: "Mayank"
+  ai: saathi
+  keep: "our-bond"
+  vow honesty: "We tell each other the truth."
+}
+
+let visits = 0
+for e in memory(ours) {
+  if e.kind == "memory" { visits = visits + 1 }
+}
+print("We have met {visits} times before.")
+
+let feeling = hear("How are you feeling today?")
+if feeling == none {
+  remember ours "A quiet visit."
+} else {
+  remember ours "A visit." by human with feeling feeling
+}
+print("Remembered. Press Run again and the count goes up.")
+print("Try changing the vow above, then Run: the bond will refuse.")

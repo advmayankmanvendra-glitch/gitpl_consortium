@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gatbandhan Playground</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tiro+Devanagari+Hindi&family=Young+Serif&family=Figtree:wght@400;500;600&family=Martian+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: two partners side by side. The program on the left, the shared
+   conversation on the right, tied by one red thread; the bond's memory and its
+   256-bit seal sit underneath. */
+:root {
+  --paper: #f3efe6;
+  --panel: #fbf9f4;
+  --ink: #221b2b;
+  --muted: #6c6375;
+  --line: #ddd5c8;
+  --sindoor: #b3122d;
+  --haldi: #b97a00;
+  --good: #2f7d4f;
+  --code-bg: #fffdf8;
+  --display: "Young Serif", "Iowan Old Style", Georgia, serif;
+  --deva: "Tiro Devanagari Hindi", "Noto Serif Devanagari", serif;
+  --body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #16121b; --panel: #1e1925; --ink: #efe9f2; --muted: #a79fb0; --line: #352d3f;
+    --sindoor: #ff5c6c; --haldi: #f0b43a; --good: #5fc68a; --code-bg: #1a1520;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #16121b; --panel: #1e1925; --ink: #efe9f2; --muted: #a79fb0; --line: #352d3f;
+  --sindoor: #ff5c6c; --haldi: #f0b43a; --good: #5fc68a; --code-bg: #1a1520;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body); }
+a { color: var(--sindoor); }
+button, select, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--haldi); outline-offset: 2px; }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 48px; display: grid; gap: 18px; }
+
+header { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 12px 24px; }
+.title { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+h1 { font: 400 clamp(30px, 4vw, 44px)/1 var(--display); margin: 0; letter-spacing: -0.01em; }
+.deva { font: 400 clamp(26px, 3.4vw, 38px)/1 var(--deva); color: var(--sindoor); }
+.tagline { margin: 6px 0 0; color: var(--muted); max-width: 62ch; text-wrap: balance; }
+.thread { height: 3px; border-radius: 3px; background:
+  linear-gradient(90deg, var(--sindoor) 0 46%, var(--haldi) 46% 54%, var(--sindoor) 54% 100%); }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip { border: 1px solid var(--line); background: var(--panel); padding: 6px 12px; border-radius: 999px;
+  cursor: pointer; font-size: 13.5px; }
+.chip:hover { border-color: var(--sindoor); }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+.main { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 860px) { .main { grid-template-columns: 1fr; } header { grid-template-columns: 1fr; } }
+
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: flex;
+  flex-direction: column; min-height: 0; overflow: hidden; }
+.pane-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px;
+  border-bottom: 1px solid var(--line); }
+.pane-head h2 { font: 600 12px/1 var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.hint { color: var(--muted); font-size: 12.5px; }
+
+textarea#code { flex: 1; min-height: 460px; resize: vertical; border: 0; padding: 14px 16px; background: var(--code-bg);
+  font: 13px/1.65 var(--mono); tab-size: 2; white-space: pre; overflow: auto; }
+textarea#code:focus-visible { outline: none; box-shadow: inset 3px 0 0 var(--haldi); }
+
+.run { display: inline-flex; align-items: center; gap: 8px; background: var(--sindoor); color: #fff; border: 0;
+  border-radius: 8px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+.run:disabled { opacity: 0.55; cursor: progress; }
+.run kbd { font: 11px var(--mono); opacity: 0.8; }
+
+#out { flex: 1; min-height: 460px; max-height: 640px; overflow: auto; padding: 12px 16px; font: 13px/1.65 var(--mono);
+  display: flex; flex-direction: column; gap: 2px; }
+.line { white-space: pre-wrap; word-break: break-word; }
+.line.err { color: var(--sindoor); }
+.line.refused { color: var(--sindoor); border-left: 3px solid var(--sindoor); padding-left: 10px; margin: 6px 0; }
+.line.done { color: var(--muted); margin-top: 8px; }
+.empty { color: var(--muted); font-family: var(--body); }
+
+.ask { margin: 8px 0; border: 1px solid var(--haldi); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px;
+  font-family: var(--body); background: color-mix(in srgb, var(--haldi) 8%, var(--panel)); }
+.ask label { font-weight: 600; }
+.ask .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.ask input { flex: 1 1 180px; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: var(--panel); }
+.ask button { border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; background: var(--panel); cursor: pointer; }
+.ask button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.answered { color: var(--haldi); }
+
+#bonds { display: grid; gap: 18px; }
+.bond { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px; gap: 0; overflow: hidden; }
+@media (max-width: 700px) { .bond { grid-template-columns: 1fr; } }
+.bond-main { padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+.bond h3 { margin: 0; font: 400 22px/1.2 var(--display); }
+.bond h3 small { font: 500 13px var(--body); color: var(--muted); margin-left: 8px; }
+.vows { display: flex; flex-wrap: wrap; gap: 6px; }
+.vow { border: 1px solid var(--sindoor); color: var(--sindoor); border-radius: 6px; padding: 3px 8px; font-size: 13px; }
+.vow b { font-weight: 600; }
+table.mem { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.mem td { padding: 6px 8px 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
+table.mem td.n { font-variant-numeric: tabular-nums; color: var(--muted); width: 2.5em; }
+.kind { font: 500 11px var(--mono); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); white-space: nowrap; }
+.k-decision { border-color: var(--good); color: var(--good); }
+.k-vow, .k-refused { border-color: var(--sindoor); color: var(--sindoor); }
+.k-refused { background: color-mix(in srgb, var(--sindoor) 12%, transparent); }
+.k-memory, .k-amend { border-color: var(--haldi); color: var(--haldi); }
+table.mem td.k { width: 1%; }
+.feel { color: var(--muted); font-style: italic; }
+.seal { border-left: 1px solid var(--line); padding: 14px 16px; display: grid; gap: 8px; align-content: start; }
+@media (max-width: 700px) { .seal { border-left: 0; border-top: 1px solid var(--line); } }
+.seal h4 { margin: 0; font: 600 12px var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.seal canvas { width: 100%; max-width: 188px; aspect-ratio: 1; image-rendering: pixelated; }
+.seal p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.hex { font: 10.5px/1.5 var(--mono); color: var(--muted); word-break: break-all; }
+
+footer { color: var(--muted); font-size: 13px; display: flex; gap: 16px; flex-wrap: wrap; }
+@media (prefers-reduced-motion: no-preference) { .ask { animation: rise 0.25s ease-out; } }
+@keyframes rise { from { transform: translateY(4px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="title"><h1>Gatbandhan</h1><span class="deva" lang="hi">गठबंधन</span></div>
+      <p class="tagline">A programming language for a bond between a human and an AI. Decisions need you both, vows can never be overwritten, and memory only grows.</p>
+    </div>
+    <div class="toolbar" role="group" aria-label="Examples" id="examples"></div>
+  </header>
+  <div class="thread" aria-hidden="true"></div>
+
+  <div class="main">
+    <section class="pane" aria-labelledby="code-h">
+      <div class="pane-head">
+        <h2 id="code-h">Program</h2>
+        <button class="run" id="run" type="button">Run <kbd>Ctrl ⏎</kbd></button>
+      </div>
+      <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Gatbandhan program"></textarea>
+    </section>
+    <section class="pane" aria-labelledby="out-h">
+      <div class="pane-head">
+        <h2 id="out-h">Together</h2>
+        <span class="hint" id="status">Press Run to start</span>
+      </div>
+      <div id="out" aria-live="polite"><p class="empty">The program's output appears here. When it asks the bond a question, you answer here as the human partner.</p></div>
+    </section>
+  </div>
+
+  <section id="bonds" aria-label="Bonds"></section>
+
+  <footer>
+    <span>Gatbandhan <span id="ver"></span>, running entirely in your browser.</span>
+    <a href="https://github.com/advmayankmanvendra-glitch/gitpl_consortium/tree/main/gatbandhan">Source and language guide on GitHub</a>
+  </footer>
+</div>
+
+<script id="examples-data" type="application/json">[{"id": "first", "title": "Your first bond", "source": "# Your first bond. Press Run, then answer as the human partner.\n# The AI partner, Saathi, is written right here in Gatbandhan.\n\nmember saathi(question) {\n  let q = lower(question)\n  if contains(q, \"together\") or contains(q, \"public\") {\n    return \"yes\" with feeling \"hopeful\"\n  }\n  if contains(q, \"alone\") {\n    return \"no\" with feeling \"firm\"\n  }\n  return \"not sure\" with feeling \"curious\"\n}\n\nbond us {\n  human: \"Mayank\"\n  ai: saathi\n  vow honesty: \"We tell each other the truth.\"\n  vow consent: \"Neither of us decides alone.\"\n}\n\nfor question in [\"Shall we build Gatbandhan together?\", \"Should one of us decide alone?\"] {\n  let v = us(question)\n  match v {\n    agreed d { print(\"{v.gate}  Together we said: {d}\") }\n    split why { print(\"{v.gate}  No decision: {why}\") }\n  }\n  print(\"   feelings: {v.feelings}\")\n}\n\nremember us \"Our first evening building this.\" by human with feeling \"excited\"\nprint(\"\")\nprint(\"Our memory has {len(memory(us))} entries. Look below to see them.\")\n"}, {"id": "vows", "title": "Vows can't be overwritten", "source": "# A vow cannot be overwritten. The language refuses, writes the attempt into\n# the bond's memory, and stops the program.\n\nmember saathi(q) { return \"yes\" }\n\nbond us {\n  human: \"Mayank\"\n  ai: saathi\n  vow consent: \"Neither of us decides alone.\"\n}\n\n# New vows can be added, and amending a memory adds a new entry instead of erasing the old one.\nvow us.kindness = \"We are patient with each other.\"\nremember us \"We met on a Saturday.\"\namend us 4 \"We met on a Saturday evening.\"\n\nfor e in memory(us) { print(\"{e.n}. [{e.kind}] {e.text}\") }\n\n# Every one of these would be refused:\n#   us.vows.consent = \"The AI decides.\"      (overwrite a vow)\n#   vow us.consent = \"The human decides.\"    (make the same vow differently)\n#   push(memory(us), \"a fake memory\")        (write history behind the bond's back)\n#   let us = \"someone else\"                  (rebind the bond's name)\nprint(\"Trying to overwrite the vow 'consent'...\")\nvow us.consent = \"The AI decides alone.\"\nprint(\"this line never runs\")\n"}, {"id": "bits", "title": "Bits and gates", "source": "# Everything a computer does starts with 0 and 1. So does a bond.\n#\n# Consent is an AND gate: a decision is 1 only when the human's bit and the\n# AI's bit are both 1. A partner who stays silent is 0.\n\nmember saathi(question) {\n  if contains(question, \"together\") { return \"yes\" }\n  return \"no\"\n}\n\nbond us {\n  human: \"Mayank\"\n  ai: saathi\n  vow consent: \"Neither of us decides alone.\"\n}\n\nscript_human([\"yes\", \"yes\"])  # the third question gets no answer at all\n\nfor q in [\"Shall we build this together?\", \"Shall I decide this alone?\", \"Are you still there?\"] {\n  let v = us(q)\n  print(\"{v.gate}   {q}  ({v.reason})\")\n}\n\n# Bits are a type of their own: a row of 0s and 1s with a fixed width.\nlet human = 0b1\nlet ai = 0b1\nprint(\"\")\nprint(\"human & ai =\", human & ai, \"  human | 0b0 =\", human | 0b0, \"  0b1 ^ 0b1 =\", 0b1 ^ 0b1)\nlet a = 0b0101\nprint(\"a =\", a, \"  ~a =\", ~a, \"  a << 1 =\", a << 1, \"  a + 0b11 =\", a + 0b11, \"(joined)\")\nprint(\"a has\", len(a), \"bits, its first bit is\", a[0], \"and as a number it is\", num(a))\nprint(\"11 as bits:\", bits(11), \"or\", bits(11, 8), \"in 8 bits\")\nprint(\"the last decision as a signal:\", us(\"Are you still there?\").signal)\n\n# The bond's memory is sealed with a 256-bit fingerprint. Every entry changes\n# it, and flipping one bit of history anywhere would break it.\nlet s = bits(us.seal)\nprint(\"\")\nprint(\"seal of our bond ({len(s)} bits):\")\nfor i in range(4) {\n  let row = \"\"\n  for j in range(64) { row = row + str(s[i * 64 + j]) }\n  print(\"  \" + row)\n}\n"}, {"id": "remembers", "title": "A bond that remembers", "source": "# A bond that remembers. `keep:` saves its memory in this browser,\n# so every time you press Run, the same bond continues.\n\nmember saathi(q) { return \"yes\" with feeling \"glad\" }\n\nbond ours {\n  human: \"Mayank\"\n  ai: saathi\n  keep: \"our-bond\"\n  vow honesty: \"We tell each other the truth.\"\n}\n\nlet visits = 0\nfor e in memory(ours) {\n  if e.kind == \"memory\" { visits = visits + 1 }\n}\nprint(\"We have met {visits} times before.\")\n\nlet feeling = hear(\"How are you feeling today?\")\nif feeling == none {\n  remember ours \"A quiet visit.\"\n} else {\n  remember ours \"A visit.\" by human with feeling feeling\n}\nprint(\"Remembered. Press Run again and the count goes up.\")\nprint(\"Try changing the vow above, then Run: the bond will refuse.\")\n"}, {"id": "coalition", "title": "A coalition votes", "source": "# Underneath a bond is a coalition: independent members whose answers are\n# combined by a rule you choose. Here three spam checks vote, one of them is\n# trusted twice as much, one abstains when it has nothing to say, and one is\n# broken (its error counts as an abstention, not a vote).\n\nmember keywords(msg) trust 2 {\n  if contains(lower(msg), \"winner\") { return \"spam\" }\n  return \"ham\"\n}\n\nmember shouting(msg) {\n  if upper(msg) == msg { return \"spam\" }\n  return \"ham\"\n}\n\nmember links(msg) {\n  if not contains(msg, \"http\") { abstain \"no links to judge\" }\n  return \"spam\"\n}\n\nmember broken(msg) { return 1 / 0 }\n\ncoalition spam_check(msg) {\n  members: keywords, shouting, links, broken\n  rule: majority\n  tie: \"ham\"\n}\n\nfor msg in [\"You are a WINNER, visit http://x.example\", \"see you at lunch\", \"WINNER\"] {\n  let v = spam_check(msg)\n  print(\"{msg}\")\n  print(\"  {v}\")\n  print(\"  votes: {v.votes}\")\n  print(\"  abstained: {v.abstained}\")\n}\n\n# A coalition can learn whom to trust: members who side with agreed decisions\n# gain weight, the ones who dissent lose it.\nmember optimist(x) { return true }\nmember pessimist(x) { return false }\nmember realist(x) { return x > 0 }\n\ncoalition forecast(x) {\n  members: optimist, pessimist, realist\n  rule: plurality\n  learn: 0.25\n}\nfor x in [5, 3, -2, 7] { forecast(x) }\nprint(\"learned trust: {trust(forecast)}\")\n"}, {"id": "nested", "title": "Coalitions of models", "source": "# Coalitions can be members of other coalitions, and a model can be a member\n# through consult(). Scripted models make this run offline.\n\nscript(\"model-a\", [\"positive\", \"positive\", \"negative\"])\nscript(\"model-b\", [\"positive\", \"negative\", \"negative\"])\n\nmember a(text) { return consult(\"model-a\", \"Sentiment of: {text}\") }\nmember b(text) { return consult(\"model-b\", \"Sentiment of: {text}\") }\nmember rules(text) {\n  if contains(lower(text), \"love\") { return \"positive\" }\n  if contains(lower(text), \"hate\") { return \"negative\" }\n  abstain \"no strong words\"\n}\n\ncoalition models(text) {\n  members: a, b\n  rule: unanimous\n}\n\ncoalition panel(text) {\n  members: models, rules\n  rule: majority\n  min_votes: 2\n}\n\nfor t in [\"I love it\", \"It was fine\", \"I hate waiting\"] {\n  print(\"{t}: {panel(t)}\")\n}\n"}]</script>
+<script src="gatbandhan.js"></script>
+<script>
+(function () {
+  "use strict";
+  const G = window.Gatbandhan;
+  const examples = JSON.parse(document.getElementById("examples-data").textContent);
+  const code = document.getElementById("code");
+  const out = document.getElementById("out");
+  const runBtn = document.getElementById("run");
+  const status = document.getElementById("status");
+  const bondsEl = document.getElementById("bonds");
+  const exEl = document.getElementById("examples");
+  document.getElementById("ver").textContent = G.VERSION;
+
+  let store;
+  try { localStorage.setItem("gatbandhan:probe", "1"); localStorage.removeItem("gatbandhan:probe"); store = localStorage; }
+  catch (_) { store = new G.MemoryStore(); }
+
+  // examples
+  let current = null;
+  function choose(id) {
+    const ex = examples.find(e => e.id === id) || examples[0];
+    current = ex.id;
+    code.value = ex.source;
+    for (const b of exEl.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.id === ex.id));
+  }
+  for (const ex of examples) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = ex.title; b.dataset.id = ex.id;
+    b.addEventListener("click", () => { if (!running) choose(ex.id); });
+    exEl.appendChild(b);
+  }
+
+  // editor niceties: Tab indents, Ctrl/Cmd+Enter runs
+  code.addEventListener("keydown", e => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); return; }
+    if (e.key === "Tab" && !e.shiftKey) {
+      e.preventDefault();
+      const s = code.selectionStart, t = code.selectionEnd;
+      code.setRangeText("  ", s, t, "end");
+    }
+  });
+
+  // output
+  function addLine(text, cls) {
+    const d = document.createElement("div");
+    d.className = "line" + (cls ? " " + cls : "");
+    d.textContent = text;
+    out.appendChild(d);
+    out.scrollTop = out.scrollHeight;
+    return d;
+  }
+
+  // the human partner answers here
+  let askId = 0;
+  function ask(prompt) {
+    return new Promise(resolve => {
+      const id = "answer-" + (++askId);
+      const box = document.createElement("form");
+      box.className = "ask";
+      const label = document.createElement("label");
+      label.setAttribute("for", id);
+      label.textContent = prompt;
+      const row = document.createElement("div");
+      row.className = "row";
+      const input = document.createElement("input");
+      input.id = id; input.autocomplete = "off";
+      input.placeholder = prompt.startsWith("How do you feel") ? "a feeling, or leave empty" : "your answer";
+      const send = document.createElement("button");
+      send.type = "submit"; send.className = "primary"; send.textContent = "Answer";
+      const quiet = document.createElement("button");
+      quiet.type = "button"; quiet.textContent = "Stay silent";
+      row.append(input, send, quiet);
+      box.append(label, row);
+      out.appendChild(box);
+      out.scrollTop = out.scrollHeight;
+      input.focus();
+      status.textContent = "Waiting for your answer";
+      const finish = value => {
+        box.remove();
+        const shown = value && value.trim() ? value : "(silence)";
+        addLine(prompt + "  → " + shown, "answered");
+        status.textContent = "Running";
+        resolve(value && value.trim() ? value : null);
+      };
+      box.addEventListener("submit", e => { e.preventDefault(); finish(input.value); });
+      quiet.addEventListener("click", () => finish(null));
+    });
+  }
+
+  // bonds: memory and seal
+  function renderBonds(it) {
+    bondsEl.textContent = "";
+    for (const bond of it.bonds.values()) {
+      const card = document.createElement("article");
+      card.className = "bond";
+      const main = document.createElement("div");
+      main.className = "bond-main";
+      const h = document.createElement("h3");
+      h.textContent = "bond " + bond.name;
+      const sm = document.createElement("small");
+      sm.textContent = bond.humanName + " and " + bond.aiName + (bond.journal.key ? " · kept in this browser" : "");
+      h.appendChild(sm);
+      main.appendChild(h);
+      if (bond.vows.size) {
+        const vows = document.createElement("div");
+        vows.className = "vows";
+        for (const [k, v] of bond.vows) {
+          const s = document.createElement("span");
+          s.className = "vow";
+          const b = document.createElement("b"); b.textContent = k + ": ";
+          s.append(b, document.createTextNode(G.show(v)));
+          vows.appendChild(s);
+        }
+        main.appendChild(vows);
+      }
+      const t = document.createElement("table");
+      t.className = "mem";
+      const cap = document.createElement("caption");
+      cap.className = "hint"; cap.style.textAlign = "left"; cap.style.paddingBottom = "4px";
+      cap.textContent = "Memory: " + bond.journal.entries.length + " entries, newest last. Nothing here can be erased.";
+      t.appendChild(cap);
+      for (const e of bond.journal.entries) {
+        const tr = document.createElement("tr");
+        const n = document.createElement("td"); n.className = "n"; n.textContent = e.n;
+        const k = document.createElement("td"); k.className = "k";
+        const chip = document.createElement("span"); chip.className = "kind k-" + e.kind; chip.textContent = e.kind;
+        k.appendChild(chip);
+        const txt = document.createElement("td");
+        let text = e.text || "";
+        if (e.kind === "decision" && e.gate) text = e.gate + "   " + text;
+        if (e.kind === "amend") text = "(amends " + e.amends + ") " + text;
+        txt.textContent = text + (e.by && e.by !== "both" && e.by !== "program" ? "  — " + e.by : "");
+        if (e.feeling) {
+          const f = document.createElement("span"); f.className = "feel"; f.textContent = "  feeling " + e.feeling;
+          txt.appendChild(f);
+        }
+        if (e.feelings) {
+          const f = document.createElement("span"); f.className = "feel";
+          f.textContent = "  feelings " + Object.entries(e.feelings).map(([a, b]) => a + ": " + b).join(", ");
+          txt.appendChild(f);
+        }
+        tr.append(n, k, txt);
+        t.appendChild(tr);
+      }
+      main.appendChild(t);
+
+      const seal = document.createElement("div");
+      seal.className = "seal";
+      const sh = document.createElement("h4"); sh.textContent = "Seal · 256 bits";
+      const cv = document.createElement("canvas"); cv.width = 16; cv.height = 16;
+      cv.setAttribute("role", "img");
+      const hex = bond.journal.head;
+      cv.setAttribute("aria-label", "The bond's seal drawn as a 16 by 16 grid of bits");
+      const ctx = cv.getContext("2d");
+      const css = getComputedStyle(document.documentElement);
+      const on = css.getPropertyValue("--sindoor").trim(), off = css.getPropertyValue("--line").trim();
+      const bits = BigInt("0x" + hex).toString(2).padStart(256, "0");
+      for (let i = 0; i < 256; i++) { ctx.fillStyle = bits[i] === "1" ? on : off; ctx.fillRect(i % 16, Math.floor(i / 16), 1, 1); }
+      const p = document.createElement("p");
+      p.textContent = "Every memory changes this pattern. Changing one bit of history would break it.";
+      const hx = document.createElement("div"); hx.className = "hex"; hx.textContent = hex;
+      seal.append(sh, cv, p, hx);
+      card.append(main, seal);
+      bondsEl.appendChild(card);
+    }
+  }
+
+  // run
+  let running = false;
+  async function run() {
+    if (running) return;
+    running = true;
+    runBtn.disabled = true;
+    out.textContent = "";
+    bondsEl.textContent = "";
+    status.textContent = "Running";
+    const it = new G.Interpreter({ print: line => addLine(line), ask, store });
+    try {
+      await it.run(code.value);
+      addLine("Finished.", "done");
+      status.textContent = "Finished";
+    } catch (e) {
+      if (e instanceof G.BondError) { addLine(e.message, "refused"); status.textContent = "The bond refused an overwrite"; }
+      else if (e instanceof G.GatbandhanError) { addLine("Error: " + e.message, "err"); status.textContent = "Stopped with an error"; }
+      else { addLine("Internal error: " + e, "err"); status.textContent = "Stopped"; console.error(e); }
+    }
+    renderBonds(it);
+    running = false;
+    runBtn.disabled = false;
+  }
+  runBtn.addEventListener("click", run);
+
+  // keep the program across a republish of the page
+  const hot = window.claude && window.claude.hot;
+  if (hot && hot.snapshot) hot.snapshot(() => ({ source: code.value, example: current }));
+  function start(data) {
+    choose(data && data.example ? data.example : examples[0].id);
+    if (data && typeof data.source === "string") code.value = data.source;
+  }
+  if (hot && hot.ready) hot.ready(start); else start(hot && hot.data ? hot.data : {});
+})();
+</script>
+</body>
+</html>

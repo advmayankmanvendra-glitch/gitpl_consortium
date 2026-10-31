@@ -1,0 +1,33 @@
+# Your first bond. Press Run, then answer as the human partner.
+# The AI partner, Saathi, is written right here in Gatbandhan.
+
+member saathi(question) {
+  let q = lower(question)
+  if contains(q, "together") or contains(q, "public") {
+    return "yes" with feeling "hopeful"
+  }
+  if contains(q, "alone") {
+    return "no" with feeling "firm"
+  }
+  return "not sure" with feeling "curious"
+}
+
+bond us {
+  human: "Mayank"
+  ai: saathi
+  vow honesty: "We tell each other the truth."
+  vow consent: "Neither of us decides alone."
+}
+
+for question in ["Shall we build Gatbandhan together?", "Should one of us decide alone?"] {
+  let v = us(question)
+  match v {
+    agreed d { print("{v.gate}  Together we said: {d}") }
+    split why { print("{v.gate}  No decision: {why}") }
+  }
+  print("   feelings: {v.feelings}")
+}
+
+remember us "Our first evening building this." by human with feeling "excited"
+print("")
+print("Our memory has {len(memory(us))} entries. Look below to see them.")
