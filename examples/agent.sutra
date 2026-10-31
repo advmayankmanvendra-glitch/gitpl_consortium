@@ -1,0 +1,38 @@
+# Tools and agents: declare tools as ordinary Sutra code, give them to an agent,
+# and the agent loop lets the model call them until it has an answer.
+
+tool calculator(expression: str) "Evaluate simple arithmetic like '12 * 7'" {
+  let parts = split(expression)
+  let a = num(parts[0])
+  let b = num(parts[2])
+  let op = parts[1]
+  if op == "+" { return a + b }
+  if op == "-" { return a - b }
+  if op == "*" { return a * b }
+  if op == "/" { return a / b }
+  throw "unsupported operator {op}"
+}
+
+tool lookup_price(item: str) "Get the price of a menu item in rupees" {
+  let menu = {chai: 20, samosa: 15, dosa: 80}
+  if lower(item) in menu { return menu[lower(item)] }
+  throw "no such item: {item}"
+}
+
+# A scripted mock model so this example runs offline and shows the loop.
+# Remove the `model:` line to use your default model (for example Claude).
+let scripted = mock([
+  {tool: "lookup_price", args: {item: "dosa"}},
+  {tool: "calculator", args: {expression: "80 * 3"}},
+  "Three dosas cost 240 rupees.",
+])
+
+agent cashier {
+  model: scripted
+  system: "You are a cashier. Use the tools; never guess prices."
+  tools: [lookup_price, calculator]
+  max_steps: 5
+  trace: true
+}
+
+print(cashier("How much do three dosas cost?"))

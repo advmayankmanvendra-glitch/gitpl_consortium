@@ -1,0 +1,17 @@
+# The basics: variables, string interpolation, functions, loops and maps.
+
+let name = "Sutra"
+print("Hello from {name}!")
+
+fn fib(n) {
+  if n < 2 { return n }
+  return fib(n - 1) + fib(n - 2)
+}
+
+let numbers = range(1, 8)
+print("fib:", map(numbers, fib))
+
+let langs = {python: 1991, sutra: 2026}
+for lang, year in langs {
+  print("{lang} appeared in {year}")
+}

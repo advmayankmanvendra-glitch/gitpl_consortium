@@ -1,0 +1,32 @@
+# A small multi-step pipeline: extract structured facts, then branch on them.
+
+type Ticket = {
+  category: "billing" | "bug" | "feature" | "other"
+  urgent: bool
+  summary: str
+}
+
+prompt triage(message) {
+  system: "You triage support messages for a software company."
+  user: "Classify this support message:\n\n{message}"
+}
+
+prompt draft_reply(ticket) """
+  Write a two-sentence, friendly reply to a customer whose {ticket.category} ticket says:
+  {ticket.summary}
+"""
+
+let inbox = [
+  "I was charged twice this month, please fix it ASAP!",
+  "It would be nice to export reports as CSV.",
+]
+
+let urgent = []
+for message in inbox {
+  let ticket = ask triage(message) as Ticket
+  if ticket.urgent { push(urgent, ticket) }
+  print("[{ticket.category}] {ticket.summary}")
+  print("  reply: {ask draft_reply(ticket)}")
+}
+
+print("{len(urgent)} urgent ticket(s)")

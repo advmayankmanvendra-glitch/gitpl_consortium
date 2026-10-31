@@ -1,0 +1,36 @@
+# Typed outputs: `ask ... as T` makes the model return data you can use directly.
+# The reply is validated against the type and retried automatically if it does not fit.
+#
+# Run offline:        python -m sutra examples/classify.sutra
+# Run against Claude: python -m sutra examples/classify.sutra --model anthropic:claude-sonnet-5-5
+
+type Sentiment = "positive" | "negative" | "mixed"
+
+type Review = {
+  sentiment: Sentiment
+  score: num            # 1 to 5
+  highlights: [str]
+  complaint?: str       # optional field
+}
+
+prompt analyze(review) {
+  system: "You analyze customer reviews for a restaurant."
+  user: """
+    Analyze this review. Score it from 1 to 5.
+
+    Review: {review}
+  """
+}
+
+let reviews = [
+  "The biryani was incredible and the staff were lovely.",
+  "Great food, but we waited 45 minutes for a table.",
+]
+
+for review in reviews {
+  let result = ask analyze(review) as Review
+  print("{result.sentiment} ({result.score}/5): {join(result.highlights, ", ")}")
+  if result.complaint != none {
+    print("  complaint: {result.complaint}")
+  }
+}
