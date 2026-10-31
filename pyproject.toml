@@ -7,7 +7,7 @@ name = "sutra-lang"
 version = "0.1.0"
 description = "A small programming language where prompts, models, typed outputs, tools and agents are part of the syntax."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]

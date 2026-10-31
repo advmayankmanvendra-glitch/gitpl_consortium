@@ -37,7 +37,7 @@ a real map, not a string to parse.
 
 ## Quick start
 
-Requires Python 3.9+.
+Requires Python 3.10+.
 
 ```bash
 python -m sutra examples/hello.sutra          # run a program
