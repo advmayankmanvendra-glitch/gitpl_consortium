@@ -1,0 +1,28 @@
+# Coalitions can be members of other coalitions, and a model can be a member
+# through consult(). Scripted models make this run offline.
+
+script("model-a", ["positive", "positive", "negative"])
+script("model-b", ["positive", "negative", "negative"])
+
+member a(text) { return consult("model-a", "Sentiment of: {text}") }
+member b(text) { return consult("model-b", "Sentiment of: {text}") }
+member rules(text) {
+  if contains(lower(text), "love") { return "positive" }
+  if contains(lower(text), "hate") { return "negative" }
+  abstain "no strong words"
+}
+
+coalition models(text) {
+  members: a, b
+  rule: unanimous
+}
+
+coalition panel(text) {
+  members: models, rules
+  rule: majority
+  min_votes: 2
+}
+
+for t in ["I love it", "It was fine", "I hate waiting"] {
+  print("{t}: {panel(t)}")
+}

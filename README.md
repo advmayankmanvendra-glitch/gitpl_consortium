@@ -1,3 +1,7 @@
+> This repository holds two languages. **[Gatbandhan](gatbandhan/README.md)** is a
+> language for a bond between a human and an AI. **Sutra**, below, is an earlier
+> language for AI workflows.
+
 # Sutra
 
 **A small programming language for AI workflows.** In Sutra, prompts, model calls,

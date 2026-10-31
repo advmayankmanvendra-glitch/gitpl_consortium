@@ -1,0 +1,26 @@
+# A vow cannot be overwritten. The language refuses, writes the attempt into
+# the bond's memory, and stops the program.
+
+member saathi(q) { return "yes" }
+
+bond us {
+  human: "Mayank"
+  ai: saathi
+  vow consent: "Neither of us decides alone."
+}
+
+# New vows can be added, and amending a memory adds a new entry instead of erasing the old one.
+vow us.kindness = "We are patient with each other."
+remember us "We met on a Saturday."
+amend us 4 "We met on a Saturday evening."
+
+for e in memory(us) { print("{e.n}. [{e.kind}] {e.text}") }
+
+# Every one of these would be refused:
+#   us.vows.consent = "The AI decides."      (overwrite a vow)
+#   vow us.consent = "The human decides."    (make the same vow differently)
+#   push(memory(us), "a fake memory")        (write history behind the bond's back)
+#   let us = "someone else"                  (rebind the bond's name)
+print("Trying to overwrite the vow 'consent'...")
+vow us.consent = "The AI decides alone."
+print("this line never runs")

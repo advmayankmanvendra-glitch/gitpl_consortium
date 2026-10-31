@@ -1,0 +1,44 @@
+# Everything a computer does starts with 0 and 1. So does a bond.
+#
+# Consent is an AND gate: a decision is 1 only when the human's bit and the
+# AI's bit are both 1. A partner who stays silent is 0.
+
+member saathi(question) {
+  if contains(question, "together") { return "yes" }
+  return "no"
+}
+
+bond us {
+  human: "Mayank"
+  ai: saathi
+  vow consent: "Neither of us decides alone."
+}
+
+script_human(["yes", "yes"])  # the third question gets no answer at all
+
+for q in ["Shall we build this together?", "Shall I decide this alone?", "Are you still there?"] {
+  let v = us(q)
+  print("{v.gate}   {q}  ({v.reason})")
+}
+
+# Bits are a type of their own: a row of 0s and 1s with a fixed width.
+let human = 0b1
+let ai = 0b1
+print("")
+print("human & ai =", human & ai, "  human | 0b0 =", human | 0b0, "  0b1 ^ 0b1 =", 0b1 ^ 0b1)
+let a = 0b0101
+print("a =", a, "  ~a =", ~a, "  a << 1 =", a << 1, "  a + 0b11 =", a + 0b11, "(joined)")
+print("a has", len(a), "bits, its first bit is", a[0], "and as a number it is", num(a))
+print("11 as bits:", bits(11), "or", bits(11, 8), "in 8 bits")
+print("the last decision as a signal:", us("Are you still there?").signal)
+
+# The bond's memory is sealed with a 256-bit fingerprint. Every entry changes
+# it, and flipping one bit of history anywhere would break it.
+let s = bits(us.seal)
+print("")
+print("seal of our bond ({len(s)} bits):")
+for i in range(4) {
+  let row = ""
+  for j in range(64) { row = row + str(s[i * 64 + j]) }
+  print("  " + row)
+}

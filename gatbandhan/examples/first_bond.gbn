@@ -1,0 +1,44 @@
+# The first bond: a human and an AI make vows, decide together, and remember.
+#
+# The AI partner here is a small member written in Gatbandhan, so the example
+# runs offline. Swap `ai: saathi` for `ai: "claude-sonnet-5-5"` and set
+# ANTHROPIC_API_KEY to bond with a real model.
+
+member saathi(question) {
+  if contains(lower(question), "public") {
+    return "yes" with feeling "hopeful"
+  }
+  return "not yet" with feeling "careful"
+}
+
+bond us {
+  human: "Mayank"
+  ai: saathi
+  vow honesty: "We tell each other the truth."
+  vow consent: "Neither of us decides alone."
+}
+
+# The human's answers are scripted so the example runs without a keyboard.
+# Remove this line to answer at the terminal yourself.
+script_human([{answer: "Yes", feeling: "excited"}, "yes"])
+
+let v = us("Should our work stay public?")
+match v {
+  agreed d { print("Together we said: {d}") }
+  split why { print("No decision yet: {why}") }
+}
+print("Feelings: {v.feelings}")
+
+let w = us("Should we ship before it is ready?")
+match w {
+  agreed d { print("Together we said: {d}") }
+  split why { print("No decision yet: {why}") }
+}
+
+remember us "We kept the repo public, by choice of both." by human with feeling "proud"
+
+print("")
+print("Our vows:")
+for name in us.vows { print("  {name}: {us.vows[name]}") }
+print("Our memory:")
+for e in memory(us) { print("  {e.n}. [{e.kind}] {e.text}") }
