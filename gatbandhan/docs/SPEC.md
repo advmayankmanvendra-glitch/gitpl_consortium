@@ -24,7 +24,8 @@ Files use the extension `.gbn` and are UTF-8 text.
 
 - Comments start with `#` and run to the end of the line.
 - Newlines are not significant; statements may optionally be separated by `;`.
-- Numbers: `42`, `3.14`, `1_000`, and binary `0b1011` (= 11).
+- Numbers: `42`, `3.14`, `1_000`.
+- Bits: `0b0101`, `0b1_0000` (a `bits` value; the number of digits is its width).
 - Strings: `"..."` with escapes `\n \t \" \\ \{ \}`. `{expr}` inside a string
   interpolates the value of `expr`. An interpolated expression cannot contain string
   literals.
@@ -40,6 +41,7 @@ Files use the extension `.gbn` and are UTF-8 text.
 | --- | --- | --- |
 | `num` | `1`, `2.5` | `7 / 2` is `3.5`; `6 / 3` is `2` |
 | `str` | `"hi {name}"` | |
+| `bits` | `0b0101` | fixed-width row of 0s and 1s (section 4.1) |
 | `bool` | `true`, `false` | never equal to a number |
 | `none` | `none` | |
 | `list` | `[1, 2]` | |
@@ -50,7 +52,7 @@ Files use the extension `.gbn` and are UTF-8 text.
 | `bond` | `bond us { ... }` | calling it returns a verdict |
 | `verdict` | | the outcome of a coalition or bond |
 
-Falsy values: `false`, `none`, `0`, `""`, `[]`, `{}`. Everything else is truthy.
+Falsy values: `false`, `none`, `0`, bits that are all 0, `""`, `[]`, `{}`. Everything else is truthy.
 `==` compares by value (lists and maps deeply).
 
 ## 4. Statements and expressions
@@ -68,8 +70,27 @@ break  continue
 
 Operators, loosest to tightest: `or`; `and`; `not`; `== != < <= > >= in`; `|`; `^`;
 `&`; `<< >>`; `+ -`; `* / %`; unary `-` and `~`; calls `f(x)`, indexing `x[i]`, fields
-`x.f`. The bit operators `& | ^ ~ << >>` work on whole numbers. Because they bind
-tighter than comparisons, `a & b == 0` means `(a & b) == 0`.
+`x.f`. Because the bit operators bind tighter than comparisons, `a & b == 0` means
+`(a & b) == 0`.
+
+### 4.1 Bits
+
+Bits are a type of their own, not another spelling of numbers. `0b0101` has width 4 and
+prints as `0b0101`; `0b01` and `0b1` are different values (widths 2 and 1).
+
+| Expression | Result |
+| --- | --- |
+| `a & b`, `a \| b`, `a ^ b` | bitwise AND, OR, XOR; the result has the larger width |
+| `~a` | every bit flipped, same width |
+| `a << n`, `a >> n` | shifted by `n` places, same width; bits pushed out are lost |
+| `a + b` | `a` and `b` joined side by side: `0b01 + 0b1 == 0b011` |
+| `len(a)`, `a[i]`, `for x in a` | width, bit `i` from the left (0 or 1), each bit in turn |
+| `num(a)` | the bits read as a whole number |
+| `bits(x, width?)` | bits from a whole number, a list of 0s and 1s, a string like `"0110"`, or a bond's seal |
+
+Mixing bits and numbers in a bit operator is an error: write `bits(n, width)` to turn a
+number into bits. The operators `& | ^ ~ << >>` also work on two whole numbers, giving a
+number.
 
 ## 5. Members
 
@@ -184,7 +205,7 @@ Entries are maps with `n`, `kind` (`bond`, `vow`, `decision`, `memory`, `amend`,
 **The seal.** `us.seal` is the bond's 256-bit fingerprint, written as 64 hex digits: the
 SHA-256 hash of the newest memory entry, which itself covers every entry before it. Each
 new entry changes the seal, and changing a single bit of past memory would too.
-`bits(us.seal)` shows it as 256 zeros and ones. `memory(us)` and
+`bits(us.seal)` gives it as a 256-bit `bits` value. `memory(us)` and
 `us.memory` are sealed; `copy(...)` gives a changeable copy.
 
 ### 7.4 What is refused
@@ -229,6 +250,7 @@ evident, not impossible.
 | `question` | for a bond, the question asked |
 | `rule` | the rule used, for example `majority` or `threshold 0.7`; `and` for a bond |
 | `bits` | map of each voice to a bit (see below) |
+| `signal` | the same bits as a `bits` value, for example `0b11` for a bond's consent |
 | `gate` | the decision written as a logic gate, for example `1 ∧ 1 = 1` |
 
 **Bits and gates.** Every decision is also a small circuit. A voice's bit is 1 when it
@@ -251,8 +273,7 @@ Either arm may be left out, and the names after `agreed` and `split` are optiona
 `print(...)`, `len`, `str`, `num`, `type_of`, `lower`, `upper`, `trim`, `contains`,
 `starts_with`, `ends_with`, `split(s, sep?)`, `join(list, sep?)`, `replace`, `keys`,
 `values`, `push`, `range(n)` / `range(a, b)`, `round(x, digits?)`, `abs`, `min`, `max`,
-`sum`, `sort`, `copy`, `bits(n, width?)` (a whole number as a string of 0s and 1s, or a
-bond's seal as 256 bits), `error(msg)`, `version()`.
+`sum`, `sort`, `copy`, `bits(x, width?)` (section 4.1), `error(msg)`, `version()`.
 
 Partners and models: `hear(prompt)` reads a line from the human (or `none`);
 `script_human(list)`; `consult(model, text)` asks a model; `script(model, replies)` makes

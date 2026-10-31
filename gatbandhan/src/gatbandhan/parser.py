@@ -3,6 +3,7 @@
 from . import ast
 from .errors import GbnSyntaxError
 from .lexer import tokenize
+from .values import Bits
 
 RULES = {"majority", "plurality", "unanimous", "quorum", "threshold"}
 RULES_WITH_ARG = {"quorum", "threshold"}
@@ -390,6 +391,9 @@ class Parser:
         if t.kind == "NUMBER":
             self.advance()
             return ast.Literal(t.line, t.value)
+        if t.kind == "BITS":
+            self.advance()
+            return ast.Literal(t.line, Bits(*t.value))
         if t.kind == "STRING":
             self.advance()
             return self.template(t.value, t.line)

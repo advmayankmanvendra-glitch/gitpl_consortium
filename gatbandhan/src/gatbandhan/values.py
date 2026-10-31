@@ -65,7 +65,7 @@ class Verdict:
 
     FIELDS = ("agreed", "decision", "reason", "votes", "abstained", "dissent",
               "tally", "margin", "tiebreak", "coalition", "feelings", "question",
-              "bits", "gate", "rule")
+              "bits", "signal", "gate", "rule")
 
     def get(self, name):
         if name not in self.FIELDS:
@@ -74,6 +74,11 @@ class Verdict:
             return self.bits()
         if name == "gate":
             return self.gate()
+        if name == "signal":
+            row = list(self.bits().values())
+            if not row:
+                return None
+            return Bits(int("".join(map(str, row)), 2), len(row))
         return getattr(self, name)
 
     def bits(self):
@@ -96,6 +101,35 @@ class Verdict:
         if self.partners:
             return f"{bits[0]} ∧ {bits[1]} = {out}"
         return f"{self.rule.upper()}({', '.join(map(str, bits))}) = {out}"
+
+
+@dataclass(frozen=True)
+class Bits:
+    """A fixed-width row of 0s and 1s, like ``0b0101``. Bit 0 is the leftmost."""
+    value: int
+    width: int
+
+    def __post_init__(self):
+        if self.width < 1:
+            raise ValueError("bits need a width of at least 1")
+        if not 0 <= self.value < (1 << self.width):
+            raise ValueError(f"{self.value} does not fit in {self.width} bits")
+
+    @property
+    def mask(self):
+        return (1 << self.width) - 1
+
+    def digits(self):
+        return format(self.value, "b").zfill(self.width)
+
+    def __getitem__(self, i):
+        return int(self.digits()[i])
+
+    def __len__(self):
+        return self.width
+
+    def __iter__(self):
+        return (int(c) for c in self.digits())
 
 
 class Sealed:
@@ -196,6 +230,8 @@ def type_name(v):
         return "bond"
     if isinstance(v, Verdict):
         return "verdict"
+    if isinstance(v, Bits):
+        return "bits"
     if isinstance(v, Callable):
         return "fn"
     return type(v).__name__
@@ -217,6 +253,8 @@ def show(v, quote=False):
         return str(v)
     if isinstance(v, str):
         return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"' if quote else v
+    if isinstance(v, Bits):
+        return "0b" + v.digits()
     if isinstance(v, list):
         return "[" + ", ".join(show(x, True) for x in v) + "]"
     if isinstance(v, dict):
@@ -248,6 +286,8 @@ def freeze(v):
         return (type(v).__name__, v)
     if isinstance(v, (int, float)):
         return ("num", float(v))
+    if isinstance(v, Bits):
+        return ("bits", v.value, v.width)
     if isinstance(v, list):
         return ("list", tuple(freeze(x) for x in v))
     if isinstance(v, dict):

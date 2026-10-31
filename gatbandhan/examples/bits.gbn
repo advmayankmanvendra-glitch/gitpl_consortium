@@ -21,12 +21,16 @@ for q in ["Shall we build this together?", "Shall I decide this alone?", "Are yo
   print("{v.gate}   {q}  ({v.reason})")
 }
 
-# Binary numbers are part of the language.
+# Bits are a type of their own: a row of 0s and 1s with a fixed width.
 let human = 0b1
 let ai = 0b1
 print("")
-print("human & ai =", human & ai, "  human | 0 =", human | 0, "  1 ^ 1 =", 1 ^ 1)
-print("0b1011 is", 0b1011, "and 11 is", bits(11), "or", bits(11, 8), "in 8 bits")
+print("human & ai =", human & ai, "  human | 0b0 =", human | 0b0, "  0b1 ^ 0b1 =", 0b1 ^ 0b1)
+let a = 0b0101
+print("a =", a, "  ~a =", ~a, "  a << 1 =", a << 1, "  a + 0b11 =", a + 0b11, "(joined)")
+print("a has", len(a), "bits, its first bit is", a[0], "and as a number it is", num(a))
+print("11 as bits:", bits(11), "or", bits(11, 8), "in 8 bits")
+print("the last decision as a signal:", us("Are you still there?").signal)
 
 # The bond's memory is sealed with a 256-bit fingerprint. Every entry changes
 # it, and flipping one bit of history anywhere would break it.
@@ -35,6 +39,6 @@ print("")
 print("seal of our bond ({len(s)} bits):")
 for i in range(4) {
   let row = ""
-  for j in range(64) { row = row + s[i * 64 + j] }
+  for j in range(64) { row = row + str(s[i * 64 + j]) }
   print("  " + row)
 }

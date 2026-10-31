@@ -320,15 +320,37 @@ class Bonds(unittest.TestCase):
 
 
 class Bits(unittest.TestCase):
-    def test_binary_literals_and_operators(self):
-        src = "print(0b1011, 0b1_0, 6 & 3, 6 | 3, 6 ^ 3, ~0, 1 << 4, 16 >> 2, 1 | 2 == 3)"
-        self.assertEqual(output(src), "11 2 2 7 5 -1 16 4 true\n")
-        self.assertEqual(output("print(bits(11), bits(11, 8), bits(0))"), "1011 00001011 0\n")
+    def test_bits_literals_keep_their_width(self):
+        self.assertEqual(output("print(0b0101, type_of(0b0101), len(0b0101), num(0b0101), 0b1_0)"),
+                         "0b0101 bits 4 5 0b10\n")
+        self.assertEqual(output("print(0b01 == 0b1, 0b1 == bits(1), 0b101 == 0b101)"), "false true true\n")
+
+    def test_bit_operators(self):
+        src = "let a = 0b0101 let b = 0b0011 print(a & b, a | b, a ^ b, ~a, a << 1, a >> 2, a + b, 0b1 & 0b0110)"
+        self.assertEqual(output(src), "0b0001 0b0111 0b0110 0b1010 0b1010 0b0001 0b01010011 0b0000\n")
+
+    def test_bits_index_loop_and_truth(self):
+        src = "let a = 0b101 let s = 0 for x in a { s = s + x } print(a[0], a[1], a[-1], s, not 0b000, not 0b010)"
+        self.assertEqual(output(src), "1 0 1 2 true false\n")
+
+    def test_making_bits(self):
+        src = 'print(bits(11), bits(11, 8), bits(0), bits([1, 0, 1]), bits("0110"), bits(0b11, 4))'
+        self.assertEqual(output(src), "0b1011 0b00001011 0b0 0b101 0b0110 0b0011\n")
+
+    def test_numbers_still_have_bit_operators(self):
+        self.assertEqual(output("print(6 & 3, 6 | 3, 6 ^ 3, ~0, 1 << 4, 16 >> 2, 1 | 2 == 3)"),
+                         "2 7 5 -1 16 4 true\n")
+
+    def test_bit_errors(self):
         with self.assertRaises(GbnSyntaxError):
             run("print(0b12)")
-        for src in ["print(1.5 & 1)", 'print("a" | 1)', "print(1 << -1)", "print(bits(-1))"]:
-            with self.subTest(src=src), self.assertRaises(GbnRuntimeError):
+        bad = ["print(0b1 & 1)", "print(1 | 0b1)", "print(1.5 & 1)", 'print("a" | 1)',
+               "print(1 << -1)", "print(bits(-1))", "print(bits(5, 2))", "print(bits([2]))",
+               "let a = 0b1 a[0] = 0"]
+        for src in bad:
+            with self.subTest(src=src), self.assertRaises(GbnRuntimeError) as cm:
                 run(src)
+            self.assertEqual(cm.exception.line, 1)
 
     def test_consent_is_an_and_gate(self):
         src = BOND + '''
@@ -356,7 +378,11 @@ class Bits(unittest.TestCase):
         g = it.globals.vars
         self.assertNotEqual(g["a"], g["b"])
         self.assertEqual(len(g["s"]), 256)
-        self.assertEqual(int(g["s"], 2), int(g["b"], 16))
+        self.assertEqual(g["s"].value, int(g["b"], 16))
+
+    def test_signal(self):
+        src = BOND + 'script_human(["yes", "yes"]) print(us("public?").signal, us("rush?").signal)'
+        self.assertEqual(output(src), "0b11 0b10\n")
 
 
 class KeptBonds(unittest.TestCase):

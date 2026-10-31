@@ -1,7 +1,7 @@
 """Built-in functions."""
 
 from .errors import GbnRuntimeError
-from .values import Bond, Builtin, Coalition, show, type_name, unseal
+from .values import Bits, Bond, Builtin, Coalition, show, type_name, unseal
 
 VERSION = "0.1.0"
 
@@ -84,7 +84,7 @@ def _nums(xs, fn):
 
 
 def _len(v):
-    if isinstance(v, (str, list, dict)):
+    if isinstance(v, (str, list, dict, Bits)):
         return len(v)
     raise GbnRuntimeError(f"len needs a string, list or map, got a {type_name(v)}")
 
@@ -92,6 +92,8 @@ def _len(v):
 def _num(v):
     if isinstance(v, (int, float)) and not isinstance(v, bool):
         return v
+    if isinstance(v, Bits):
+        return v.value
     if isinstance(v, str):
         try:
             f = float(v.strip())
@@ -174,14 +176,32 @@ def _bond(it, args, line, fn):
 
 
 def _bits(v, width=None):
-    """A number as a string of bits, or a bond's 256-bit seal (hex) as bits."""
-    if isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v):
-        n, size = int(v, 16), 256
+    """Make bits from a whole number, a list of 0s and 1s, a string like "0101",
+    or a bond's seal (64 hex digits, 256 bits)."""
+    if isinstance(v, Bits):
+        n, size = v.value, v.width
+    elif isinstance(v, list):
+        if not v or any(x not in (0, 1) or isinstance(x, bool) for x in v):
+            raise GbnRuntimeError("bits from a list needs a non-empty list of 0s and 1s")
+        n, size = int("".join(str(x) for x in v), 2), len(v)
+    elif isinstance(v, str):
+        if v and set(v) <= {"0", "1"}:
+            n, size = int(v, 2), len(v)
+        elif len(v) == 64 and all(c in "0123456789abcdef" for c in v):
+            n, size = int(v, 16), 256
+        else:
+            raise GbnRuntimeError("bits from text needs 0s and 1s, or a bond's seal")
     else:
         n = _n(v, "bits")
         if not float(n).is_integer() or n < 0:
-            raise GbnRuntimeError("bits needs a whole number of 0 or more, or a bond's seal")
-        n, size = int(n), 0
-    text = format(n, "b")
-    width = int(width) if width is not None else size
-    return text.zfill(width)
+            raise GbnRuntimeError("bits needs a whole number of 0 or more")
+        n = int(n)
+        size = max(1, n.bit_length())
+    if width is not None:
+        width = int(_n(width, "bits"))
+        if width < 1:
+            raise GbnRuntimeError("bits need a width of at least 1")
+        if n >= (1 << width):
+            raise GbnRuntimeError(f"{n} does not fit in {width} bits")
+        size = width
+    return Bits(n, size)

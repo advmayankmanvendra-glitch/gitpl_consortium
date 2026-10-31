@@ -55,7 +55,7 @@ def tokenize(src, line=1):
             digits = src[i + 2:j].replace("_", "")
             if not digits or (j < n and (src[j].isalnum())):
                 raise GbnSyntaxError("a binary number is 0b followed by 0s and 1s", line)
-            tokens.append(Token("NUMBER", int(digits, 2), line))
+            tokens.append(Token("BITS", (int(digits, 2), len(digits)), line))
             i = j
         elif ch.isdigit():
             j = i

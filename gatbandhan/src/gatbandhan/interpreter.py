@@ -11,7 +11,7 @@ from .errors import GatbandhanError, GbnRuntimeError
 from .journal import Journal, utc_now
 from .models import Human, Models
 from .parser import parse
-from .values import (Bond, Builtin, Callable, Coalition, Function, Member,
+from .values import (Bits, Bond, Builtin, Callable, Coalition, Function, Member,
                      SealedError, Verdict, freeze, seal, show, type_name, unseal)
 
 
@@ -155,7 +155,7 @@ class Interpreter:
             seq = self.eval(s.iterable, env)
             if isinstance(seq, dict):
                 items = list(seq.keys())
-            elif isinstance(seq, (list, str)):
+            elif isinstance(seq, (list, str, Bits)):
                 items = list(seq)
             else:
                 raise GbnRuntimeError(f"cannot loop over a {type_name(seq)}", s.line)
@@ -467,7 +467,10 @@ class Interpreter:
                 return fn.fn(self, args, line) if fn.pass_interp else fn.fn(*args)
             except SealedError as e:
                 self.sealed_change(e.container, line)
-            except GatbandhanError:
+            except GatbandhanError as e:
+                if e.line is None:
+                    e.line = line
+                    e.args = (f"line {line}: {e.message}",)
                 raise
             except TypeError as e:
                 raise GbnRuntimeError(f"{fn.name}: {e}", line)
@@ -527,6 +530,8 @@ class Interpreter:
             if e.op == "not":
                 return not truthy(v)
             if e.op == "~":
+                if isinstance(v, Bits):
+                    return Bits(~v.value & v.mask, v.width)
                 if not _is_int(v):
                     raise GbnRuntimeError(f"'~' needs a whole number, got a {type_name(v)}", e.line)
                 return ~int(v)
@@ -574,12 +579,19 @@ class Interpreter:
                 return a + b
             if isinstance(a, list) and isinstance(b, list):
                 return list(a) + list(b)
+            if isinstance(a, Bits) and isinstance(b, Bits):
+                return Bits((a.value << b.width) | b.value, a.width + b.width)  # join side by side
             raise GbnRuntimeError(f"cannot add a {type_name(a)} and a {type_name(b)}", e.line)
         if op in ("<", "<=", ">", ">="):
             if not ((_is_num(a) and _is_num(b)) or (isinstance(a, str) and isinstance(b, str))):
                 raise GbnRuntimeError(f"cannot compare a {type_name(a)} and a {type_name(b)}", e.line)
             return {"<": a < b, "<=": a <= b, ">": a > b, ">=": a >= b}[op]
+        if op in ("&", "|", "^", "<<", ">>") and isinstance(a, Bits):
+            return self.bit_op(op, a, b, e.line)
         if op in ("&", "|", "^", "<<", ">>"):
+            if isinstance(b, Bits):
+                raise GbnRuntimeError(f"cannot combine a number and bits with '{op}'; "
+                                      "turn the number into bits with bits(n, width)", e.line)
             if not (_is_int(a) and _is_int(b)):
                 raise GbnRuntimeError(f"'{op}' needs whole numbers, got a {type_name(a)} and a {type_name(b)}", e.line)
             a, b = int(a), int(b)
@@ -607,8 +619,22 @@ class Interpreter:
             return int(r) if isinstance(a, int) and isinstance(b, int) and r.is_integer() else r
         return a % b
 
+    def bit_op(self, op, a, b, line):
+        if op in ("<<", ">>"):
+            if not _is_int(b) or b < 0:
+                raise GbnRuntimeError("bits shift by a whole number of 0 or more", line)
+            n = min(int(b), a.width)
+            v = (a.value << n) & a.mask if op == "<<" else a.value >> n
+            return Bits(v, a.width)
+        if not isinstance(b, Bits):
+            raise GbnRuntimeError(f"cannot combine bits and a {type_name(b)} with '{op}'; "
+                                  "turn the number into bits with bits(n, width)", line)
+        w = max(a.width, b.width)
+        v = {"&": a.value & b.value, "|": a.value | b.value, "^": a.value ^ b.value}[op]
+        return Bits(v, w)
+
     def index(self, obj, key, line):
-        if isinstance(obj, (list, str)):
+        if isinstance(obj, (list, str, Bits)):
             if not _is_int(key):
                 raise GbnRuntimeError("index must be a whole number", line)
             if not -len(obj) <= key < len(obj):
@@ -637,6 +663,8 @@ def truthy(v):
         return False
     if _is_num(v):
         return v != 0
+    if isinstance(v, Bits):
+        return v.value != 0
     if isinstance(v, (str, list, dict)):
         return len(v) > 0
     return True

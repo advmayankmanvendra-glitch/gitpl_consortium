@@ -18,8 +18,8 @@ itself keeps that bond honest:
   bond keeps the feeling next to the decision.
 - **Built on 0 and 1.** Consent is an AND gate, and every decision shows its gate:
   `1 ∧ 1 = 1` when both agree, `0 ∧ 1 = 0` when the human stays silent. The bond's whole
-  history is sealed in a 256-bit fingerprint, `us.seal`. Binary numbers (`0b1011`) and
-  bit operators (`& | ^ ~ << >>`) are part of the language.
+  history is sealed in a 256-bit fingerprint, `us.seal`. Bits are a data type of their
+  own, with literals like `0b0101` and the operators `& | ^ ~ << >>`.
 
 ```gbn
 member saathi(question) {
@@ -96,7 +96,7 @@ the tests yet.
 | [refused_overwrite.gbn](examples/refused_overwrite.gbn) | adding vows and amending memory, then a refused overwrite |
 | [coalition.gbn](examples/coalition.gbn) | weighted votes, abstentions, errors, learned trust |
 | [nested.gbn](examples/nested.gbn) | coalitions of coalitions and of models |
-| [bits.gbn](examples/bits.gbn) | consent as an AND gate, binary numbers, the bond's 256-bit seal |
+| [bits.gbn](examples/bits.gbn) | consent as an AND gate, the bits type, the bond's 256-bit seal |
 
 The full language is described in [docs/SPEC.md](docs/SPEC.md).
 
