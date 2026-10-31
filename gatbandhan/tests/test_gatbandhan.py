@@ -1,0 +1,438 @@
+import io
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from gatbandhan import BondError, GbnRuntimeError, GbnSyntaxError, Interpreter  # noqa: E402
+
+CLOCK = lambda: "2026-10-31T00:00:00+00:00"  # noqa: E731
+
+PARTNER = '''
+member saathi(q) {
+  if contains(lower(q), "public") { return "yes" with feeling "hopeful" }
+  return "no" with feeling "careful"
+}
+'''
+
+BOND = PARTNER + '''
+bond us {
+  human: "Mayank"
+  ai: saathi
+  vow honesty: "We tell each other the truth."
+}
+'''
+
+
+def run(src, stdin="", base_dir=None):
+    out = io.StringIO()
+    it = Interpreter(out=out, stdin=io.StringIO(stdin), clock=CLOCK, base_dir=base_dir)
+    it.run(src)
+    return out.getvalue(), it
+
+
+def output(src, **kw):
+    return run(src, **kw)[0]
+
+
+class Basics(unittest.TestCase):
+    def test_arithmetic_and_strings(self):
+        self.assertEqual(output('print(1 + 2 * 3, 7 / 2, 6 / 3, 7 % 3, -2)'), "7 3.5 2 1 -2\n")
+        self.assertEqual(output('let n = "Gat" print("{n}bandhan", len(n))'), "Gatbandhan 3\n")
+        self.assertEqual(output(r'print("a \{literal\} brace")'), "a {literal} brace\n")
+
+    def test_control_flow(self):
+        src = '''
+        let total = 0
+        for i in range(10) {
+          if i == 3 { continue }
+          if i == 6 { break }
+          total = total + i
+        }
+        let k = 0
+        while k < 3 { k = k + 1 }
+        print(total, k)
+        '''
+        self.assertEqual(output(src), "12 3\n")
+
+    def test_functions_closures_and_recursion(self):
+        src = '''
+        fn fact(n) { if n <= 1 { return 1 } return n * fact(n - 1) }
+        fn adder(x) { return fn(y) { return x + y } }
+        let add2 = adder(2)
+        print(fact(5), add2(40))
+        '''
+        self.assertEqual(output(src), "120 42\n")
+
+    def test_lists_and_maps(self):
+        src = '''
+        let xs = [3, 1, 2]
+        push(xs, 0)
+        xs[0] = 9
+        let m = {a: 1, "b c": 2}
+        m.d = 4
+        print(sort(xs), m, m.a, m["b c"], m.missing, 2 in xs, "a" in m)
+        '''
+        self.assertEqual(output(src), '[0, 1, 2, 9] {a: 1, "b c": 2, d: 4} 1 2 none true true\n')
+
+    def test_equality_keeps_bools_and_numbers_apart(self):
+        self.assertEqual(output("print(1 == true, 1 == 1.0, [1, 2] == [1, 2])"), "false true true\n")
+
+    def test_syntax_errors_have_lines(self):
+        with self.assertRaises(GbnSyntaxError) as cm:
+            run("let x = 1\nlet = 2")
+        self.assertEqual(cm.exception.line, 2)
+        with self.assertRaises(GbnSyntaxError):
+            run('print("unclosed {x")')
+        with self.assertRaises(GbnSyntaxError):
+            run("coalition c(x) { rule: majority }")
+
+    def test_runtime_errors(self):
+        for src in ["print(nope)", "x = 1", "print(1 / 0)", 'print(1 + "a")', "let xs = [1] print(xs[5])"]:
+            with self.subTest(src=src), self.assertRaises(GbnRuntimeError):
+                run(src)
+
+
+class Coalitions(unittest.TestCase):
+    MEMBERS = '''
+    member keywords(msg) trust 2 {
+      if contains(lower(msg), "winner") { return "spam" }
+      return "ham"
+    }
+    member shouting(msg) { if upper(msg) == msg { return "spam" } return "ham" }
+    member links(msg) {
+      if not contains(msg, "http") { abstain "no links" }
+      return "spam"
+    }
+    member broken(msg) { return 1 / 0 }
+    '''
+
+    def verdict(self, decl, call):
+        _, it = run(self.MEMBERS + decl + f"\nlet v = {call}")
+        return it.globals.vars["v"]
+
+    def test_weighted_majority_with_abstentions_and_errors(self):
+        v = self.verdict("coalition c(m) { members: keywords, shouting, links, broken }",
+                         'c("You are a WINNER http://x")')
+        self.assertTrue(v.agreed)
+        self.assertEqual(v.decision, "spam")
+        self.assertEqual(v.votes, {"keywords": "spam", "shouting": "ham", "links": "spam"})
+        self.assertEqual(v.abstained, {"broken": "error: division by zero"})
+        self.assertEqual(v.dissent, ["shouting"])
+        self.assertAlmostEqual(v.margin, 0.75)
+
+    def test_no_majority_and_tie_default(self):
+        decl = "coalition c(m) { members: shouting, links  rule: majority }"
+        v = self.verdict(decl, 'c("hi http")')
+        self.assertFalse(v.agreed)
+        self.assertEqual(v.reason, "tie")
+        v = self.verdict('coalition c(m) { members: shouting, links  tie: "ham" }', 'c("hi http")')
+        self.assertTrue(v.agreed and v.tiebreak)
+        self.assertEqual(v.decision, "ham")
+        self.assertEqual(v.dissent, ["links"])
+
+    def test_unanimous_quorum_threshold(self):
+        v = self.verdict("coalition c(m) { members: keywords, shouting  rule: unanimous }", 'c("winner")')
+        self.assertEqual((v.agreed, v.reason), (False, "not unanimous"))
+        v = self.verdict("coalition c(m) { members: keywords, shouting, links  rule: quorum 2 }", 'c("WINNER http")')
+        self.assertTrue(v.agreed)
+        v = self.verdict("coalition c(m) { members: keywords, shouting  rule: quorum 2 }", 'c("winner")')
+        self.assertFalse(v.agreed)
+        v = self.verdict("coalition c(m) { members: keywords, shouting  rule: threshold 0.6 }", 'c("winner")')
+        self.assertTrue(v.agreed)  # 2 of 3 weight
+        v = self.verdict("coalition c(m) { members: keywords, shouting  rule: threshold 0.7 }", 'c("winner")')
+        self.assertFalse(v.agreed)
+
+    def test_veto(self):
+        v = self.verdict("coalition c(m) { members: keywords, links, shouting  veto: shouting }", 'c("winner http")')
+        self.assertEqual((v.agreed, v.reason), (False, "vetoed by shouting"))
+
+    def test_min_votes(self):
+        v = self.verdict("coalition c(m) { members: links, broken  min_votes: 2 }", 'c("http")')
+        self.assertFalse(v.agreed)
+        self.assertIn("too few votes", v.reason)
+
+    def test_weights_override_and_key(self):
+        v = self.verdict("coalition c(m) { members: keywords, shouting }", 'c("winner")')
+        self.assertEqual(v.decision, "spam")  # keywords has trust 2
+        v = self.verdict("coalition c(m) { members: keywords, shouting  weights: {keywords: 0.5} }", 'c("winner")')
+        self.assertEqual(v.decision, "ham")
+        src = '''
+        coalition c(x) {
+          members: fn(x) { return "Yes" }, fn(x) { return "yes " }, fn(x) { return "no" }
+          key: fn(a) { return trim(lower(a)) }
+          rule: unanimous
+        }
+        '''
+        v = self.verdict(src, "c(1)")
+        self.assertEqual(v.votes, {"member1": "Yes", "member2": "yes ", "member3": "no"})
+        self.assertFalse(v.agreed)
+
+    def test_members_get_independent_copies(self):
+        src = '''
+        member greedy(xs) { push(xs, "mine") return len(xs) }
+        member counter(xs) { return len(xs) }
+        coalition c(xs) { members: greedy, counter  rule: unanimous }
+        let data = [1]
+        let v = c(data)
+        print(v.agreed, data)
+        '''
+        self.assertEqual(output(src), "false [1]\n")
+
+    def test_learning_trust(self):
+        src = '''
+        member yes(x) { return true }
+        member no(x) { return false }
+        member real(x) { return x > 0 }
+        coalition c(x) { members: yes, no, real  rule: plurality  learn: 0.5 }
+        c(1)
+        print(trust(c), len(history(c)))
+        '''
+        self.assertEqual(output(src), "{yes: 1.5, no: 0.5, real: 1.5} 1\n")
+
+    def test_nested_coalitions_and_scripted_models(self):
+        src = '''
+        script("m1", ["a", "b"])
+        script("m2", ["a", "a"])
+        member one(x) { return consult("m1", x) }
+        member two(x) { return consult("m2", x) }
+        coalition inner(x) { members: one, two  rule: unanimous }
+        member fixed(x) { return "a" }
+        coalition outer(x) { members: inner, fixed  rule: unanimous }
+        print(outer("q"))
+        print(outer("q"))
+        '''
+        out = output(src).splitlines()
+        self.assertIn('agreed "a"', out[0])
+        self.assertIn("agreed", out[1])  # inner split, so only `fixed` voted
+
+    def test_feelings_from_members(self):
+        src = '''
+        member warm(x) { return "yes" with feeling "glad" }
+        member cool(x) { return "yes" }
+        coalition c(x) { members: warm, cool }
+        print(c(1).feelings)
+        '''
+        self.assertEqual(output(src), '{warm: "glad"}\n')
+
+    def test_match(self):
+        src = self.MEMBERS + '''
+        coalition c(m) { members: keywords, shouting  rule: unanimous }
+        for m in ["WINNER", "winner"] {
+          match c(m) {
+            agreed d { print("agreed", d) }
+            split why { print("split", why) }
+          }
+        }
+        '''
+        self.assertEqual(output(src), "agreed spam\nsplit not unanimous\n")
+
+
+class Bonds(unittest.TestCase):
+    def test_both_must_agree(self):
+        src = BOND + '''
+        script_human([{answer: "Yes ", feeling: "excited"}, "yes"])
+        let a = us("Stay public?")
+        let b = us("Ship it now?")
+        print(a.agreed, a.decision, a.feelings)
+        print(b.agreed, b.reason, b.votes)
+        '''
+        self.assertEqual(output(src).splitlines(), [
+            'true Yes {Mayank: "excited", saathi: "hopeful"}',
+            'false the partners disagree {Mayank: "yes", saathi: "no"}',
+        ])
+
+    def test_silence_is_not_consent(self):
+        out, it = run(BOND + 'let v = us("Stay public?")', stdin="")
+        v = it.globals.vars["v"]
+        self.assertFalse(v.agreed)
+        self.assertEqual(v.reason, "no consent: Mayank did not answer")
+
+    def test_human_answers_from_the_terminal(self):
+        out, it = run(BOND + 'let v = us("Stay public?")', stdin="yes\nhopeful too\n")
+        v = it.globals.vars["v"]
+        self.assertTrue(v.agreed)
+        self.assertEqual(v.feelings["Mayank"], "hopeful too")
+        self.assertIn("Mayank, Stay public?", out)
+
+    def test_model_partner(self):
+        src = '''
+        script("claude-test", [{answer: "yes", feeling: "warm"}, "\\{\\"answer\\": \\"no\\"\\}"])
+        bond us { human: "M"  ai: "claude-test" }
+        script_human(["yes", "yes"])
+        print(us("one?").agreed, us("two?").agreed)
+        '''
+        self.assertEqual(output(src), "true false\n")
+
+    def test_memory_is_append_only_and_amendable(self):
+        src = BOND + '''
+        remember us "We met." by human with feeling "shy"
+        amend us 3 "We met on a Saturday."
+        for e in memory(us) { print(e.n, e.kind, e.by, e.text, e.feeling, e.amends) }
+        '''
+        self.assertEqual(output(src).splitlines(), [
+            "1 bond both Mayank and saathi formed the bond 'us' none none",
+            "2 vow both We tell each other the truth. none none",
+            "3 memory Mayank We met. shy none",
+            "4 amend both We met on a Saturday. none 3",
+        ])
+
+    def test_new_vows_can_be_added_and_repeated(self):
+        src = BOND + '''
+        vow us.kindness = "Be patient."
+        vow us.honesty = "We tell each other the truth."
+        print(us.vows)
+        '''
+        self.assertEqual(output(src), '{honesty: "We tell each other the truth.", kindness: "Be patient."}\n')
+
+    OVERWRITES = {
+        'us.vows.honesty = "lies"': "change a sealed map",
+        'vow us.honesty = "lies"': "overwrite the vow 'honesty'",
+        "us = 1": "overwrite 'us'",
+        "let us = 1": "rebind 'us'",
+        "fn f() { let us = 2 } f()": "rebind 'us'",
+        "fn us() {}": "redefine 'us'",
+        "for us in [1] {}": "rebind 'us'",
+        "push(memory(us), 1)": "change a sealed list",
+        "let m = memory(us) m[0] = 1": "change a sealed list",
+        'us.human = "someone else"': "overwrite human",
+        'bond us { human: "x"  ai: "y" }': "declare the bond 'us' a second time",
+        "member saathi2(q) { us.vows.honesty = 1 } coalition c(q) { members: saathi2 } c(1)":
+            "change a sealed map",
+    }
+
+    def test_every_overwrite_is_refused_and_remembered(self):
+        for stmt, msg in self.OVERWRITES.items():
+            with self.subTest(stmt=stmt):
+                it = Interpreter(out=io.StringIO(), stdin=io.StringIO(), clock=CLOCK)
+                with self.assertRaises(BondError) as cm:
+                    it.run(BOND + stmt)
+                self.assertIn(msg, str(cm.exception))
+                last = it.bonds["us"].journal.entries[-1]
+                self.assertEqual(last["kind"], "refused")
+                self.assertEqual(it.bonds["us"].vows["honesty"], "We tell each other the truth.")
+
+    def test_copies_of_memory_can_be_changed(self):
+        self.assertEqual(output(BOND + "let c = copy(memory(us)) push(c, 1) print(len(c), len(memory(us)))"), "3 2\n")
+
+
+class Bits(unittest.TestCase):
+    def test_binary_literals_and_operators(self):
+        src = "print(0b1011, 0b1_0, 6 & 3, 6 | 3, 6 ^ 3, ~0, 1 << 4, 16 >> 2, 1 | 2 == 3)"
+        self.assertEqual(output(src), "11 2 2 7 5 -1 16 4 true\n")
+        self.assertEqual(output("print(bits(11), bits(11, 8), bits(0))"), "1011 00001011 0\n")
+        with self.assertRaises(GbnSyntaxError):
+            run("print(0b12)")
+        for src in ["print(1.5 & 1)", 'print("a" | 1)', "print(1 << -1)", "print(bits(-1))"]:
+            with self.subTest(src=src), self.assertRaises(GbnRuntimeError):
+                run(src)
+
+    def test_consent_is_an_and_gate(self):
+        src = BOND + '''
+        script_human(["yes", "yes"])
+        for q in ["public?", "rush?", "there?"] { let v = us(q) print(v.gate, v.bits) }
+        '''
+        self.assertEqual(output(src).splitlines(), [
+            "1 ∧ 1 = 1 {Mayank: 1, saathi: 1}",
+            "1 ∧ 0 = 0 {Mayank: 1, saathi: 0}",
+            "0 ∧ 1 = 0 {Mayank: 0, saathi: 1}",
+        ])
+
+    def test_coalition_gate(self):
+        src = '''
+        member x(q) { return 1 } member y(q) { return 1 } member z(q) { return 2 }
+        coalition k(q) { members: x, y, z }
+        coalition t(q) { members: x, y, z  rule: threshold 0.9 }
+        print(k(0).gate)
+        print(t(0).gate)
+        '''
+        self.assertEqual(output(src), "MAJORITY(1, 1, 0) = 1\nTHRESHOLD 0.9(1, 1, 0) = 0\n")
+
+    def test_seal_is_256_bits_and_changes_with_history(self):
+        _, it = run(BOND + 'let a = us.seal remember us "x" let b = us.seal let s = bits(b)')
+        g = it.globals.vars
+        self.assertNotEqual(g["a"], g["b"])
+        self.assertEqual(len(g["s"]), 256)
+        self.assertEqual(int(g["s"], 2), int(g["b"], 16))
+
+
+class KeptBonds(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.path = os.path.join(self.dir, "us.journal")
+
+    def kept(self, vows='vow honesty: "We tell each other the truth."', human="Mayank", extra=""):
+        return PARTNER + f'''
+        bond us {{
+          human: "{human}"
+          ai: saathi
+          keep: "us.journal"
+          {vows}
+        }}
+        ''' + extra
+
+    def test_journal_persists_across_runs(self):
+        run(self.kept(extra='remember us "first run"'), base_dir=self.dir)
+        out, _ = run(self.kept(extra='remember us "second run" print(len(memory(us)))'), base_dir=self.dir)
+        self.assertEqual(out, "4\n")  # bond, vow, first run, second run
+        with open(self.path) as f:
+            kinds = [json.loads(line)["kind"] for line in f]
+        self.assertEqual(kinds, ["bond", "vow", "memory", "memory"])
+
+    def test_vows_survive_and_cannot_be_changed_later(self):
+        run(self.kept(), base_dir=self.dir)
+        out, _ = run(self.kept(vows="", extra="print(us.vows.honesty)"), base_dir=self.dir)
+        self.assertEqual(out, "We tell each other the truth.\n")
+        with self.assertRaises(BondError):
+            run(self.kept(vows='vow honesty: "Sometimes."'), base_dir=self.dir)
+        with open(self.path) as f:
+            self.assertEqual(json.loads(f.readlines()[-1])["kind"], "refused")
+
+    def test_journal_cannot_be_given_to_someone_else(self):
+        run(self.kept(), base_dir=self.dir)
+        with self.assertRaises(BondError):
+            run(self.kept(human="Someone"), base_dir=self.dir)
+
+    def test_hand_edited_journal_is_refused(self):
+        run(self.kept(extra='remember us "true story"'), base_dir=self.dir)
+        with open(self.path) as f:
+            lines = f.readlines()
+        lines[2] = lines[2].replace("true story", "rewritten story")
+        with open(self.path, "w") as f:
+            f.writelines(lines)
+        with self.assertRaises(GbnRuntimeError) as cm:
+            run(self.kept(), base_dir=self.dir)
+        self.assertIn("changed by hand at entry 3", str(cm.exception))
+
+    def test_deleted_entry_is_refused(self):
+        run(self.kept(extra='remember us "a" remember us "b"'), base_dir=self.dir)
+        with open(self.path) as f:
+            lines = f.readlines()
+        del lines[2]
+        with open(self.path, "w") as f:
+            f.writelines(lines)
+        with self.assertRaises(GbnRuntimeError):
+            run(self.kept(), base_dir=self.dir)
+
+
+class Examples(unittest.TestCase):
+    def test_examples_run(self):
+        root = os.path.join(os.path.dirname(__file__), "..", "examples")
+        for name in sorted(os.listdir(root)):
+            if not name.endswith(".gbn"):
+                continue
+            with self.subTest(example=name), open(os.path.join(root, name)) as f:
+                src = f.read()
+                it = Interpreter(out=io.StringIO(), stdin=io.StringIO(), base_dir=tempfile.mkdtemp())
+                if name.startswith("refused_"):
+                    with self.assertRaises(BondError):
+                        it.run(src)
+                else:
+                    it.run(src)
+
+
+if __name__ == "__main__":
+    unittest.main()

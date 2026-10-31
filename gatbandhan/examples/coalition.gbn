@@ -1,0 +1,49 @@
+# Underneath a bond is a coalition: independent members whose answers are
+# combined by a rule you choose. Here three spam checks vote, one of them is
+# trusted twice as much, one abstains when it has nothing to say, and one is
+# broken (its error counts as an abstention, not a vote).
+
+member keywords(msg) trust 2 {
+  if contains(lower(msg), "winner") { return "spam" }
+  return "ham"
+}
+
+member shouting(msg) {
+  if upper(msg) == msg { return "spam" }
+  return "ham"
+}
+
+member links(msg) {
+  if not contains(msg, "http") { abstain "no links to judge" }
+  return "spam"
+}
+
+member broken(msg) { return 1 / 0 }
+
+coalition spam_check(msg) {
+  members: keywords, shouting, links, broken
+  rule: majority
+  tie: "ham"
+}
+
+for msg in ["You are a WINNER, visit http://x.example", "see you at lunch", "WINNER"] {
+  let v = spam_check(msg)
+  print("{msg}")
+  print("  {v}")
+  print("  votes: {v.votes}")
+  print("  abstained: {v.abstained}")
+}
+
+# A coalition can learn whom to trust: members who side with agreed decisions
+# gain weight, the ones who dissent lose it.
+member optimist(x) { return true }
+member pessimist(x) { return false }
+member realist(x) { return x > 0 }
+
+coalition forecast(x) {
+  members: optimist, pessimist, realist
+  rule: plurality
+  learn: 0.25
+}
+for x in [5, 3, -2, 7] { forecast(x) }
+print("learned trust: {trust(forecast)}")
