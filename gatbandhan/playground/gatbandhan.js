@@ -285,15 +285,15 @@
       const arms = {};
       while (!this.isOp(this.tok, "}")) {
         const t = this.tok;
-        if (t.kind !== "IDENT" || (t.value !== "agreed" && t.value !== "split")) this.error("expected an 'agreed' or 'split' arm");
+        if (t.kind !== "IDENT" || !MATCH_ARMS.includes(t.value)) this.error("expected an arm: approved, rejected, disagreed, silent, agreed or split");
         if (arms[t.value]) this.error(`duplicate '${t.value}' arm`);
         this.advance();
         const name = this.tok.kind === "IDENT" ? this.advance().value : null;
         arms[t.value] = { name, body: this.block() };
       }
       this.advance();
-      if (!arms.agreed && !arms.split) this.error("a match needs at least one arm");
-      return { type: "Match", line, subject, agreed: arms.agreed || null, split: arms.split || null };
+      if (!Object.keys(arms).length) this.error("a match needs at least one arm");
+      return { type: "Match", line, subject, arms };
     }
 
     bond() {
@@ -529,22 +529,43 @@
   }
 
   const VERDICT_FIELDS = ["agreed", "decision", "reason", "votes", "abstained", "dissent", "tally", "margin",
-    "tiebreak", "coalition", "feelings", "question", "bits", "signal", "gate", "rule"];
+    "tiebreak", "coalition", "feelings", "question", "bits", "signal", "gate", "rule", "outcome", "approved"];
+  const MATCH_ARMS = ["approved", "rejected", "disagreed", "silent", "agreed", "split"];
+  const YES_WORDS = new Set(["yes", "y", "yeah", "yep", "haan", "haa", "ha", "ji", "ok", "okay", "sure",
+    "agree", "agreed", "approve", "approved", "true"]);
+  const NO_WORDS = new Set(["no", "n", "nope", "nahi", "nahin", "na", "disagree", "reject", "rejected", "never", "false"]);
+
+  // 1 for a yes, 0 for a no, null for silence or an open answer (like "tea").
+  function yesNo(answer) {
+    if (typeof answer === "boolean") return answer ? 1 : 0;
+    if (typeof answer === "string") {
+      const word = answer.trim().toLowerCase().replace(/[.!]+$/, "");
+      if (YES_WORDS.has(word)) return 1;
+      if (NO_WORDS.has(word)) return 0;
+    }
+    return null;
+  }
 
   class Verdict {
     constructor(o) {
-      Object.assign(this, { tiebreak: false, feelings: new Map(), question: null, rule: "", partners: null }, o);
+      Object.assign(this, { tiebreak: false, feelings: new Map(), question: null, rule: "", partners: null, outcome: "", marks: null }, o);
     }
+    // True only for a real yes: a bond's approval, or a coalition's agreement.
+    get approved() { return this.partners ? this.outcome === "approved" : this.agreed; }
     get(name) {
+      if (name === "outcome") return this.outcome || (this.agreed ? "agreed" : "split");
+      if (name === "approved") return this.approved;
       if (name === "bits") return this.bitsMap();
       if (name === "gate") return this.gate();
       if (name === "signal") {
         const row = [...this.bitsMap().values()];
-        return row.length ? new Bits(BigInt("0b" + row.join("")), row.length) : null;
+        return row.length && !row.includes(null) ? new Bits(BigInt("0b" + row.join("")), row.length) : null;
       }
       return this[name];
     }
     bitsMap() {
+      // A bond lists both partners: 1 for yes, 0 for no, none for silence.
+      if (this.partners) return new Map(this.marks);
       let lead;
       if (this.agreed) lead = new Set([...this.votes.keys()].filter(m => !this.dissent.includes(m)));
       else lead = new Set(this.tally.length ? this.tally[0].get("members") : []);
@@ -554,7 +575,11 @@
     gate() {
       const b = [...this.bitsMap().values()];
       const out = this.agreed ? 1 : 0;
-      if (this.partners) return `${b[0]} ∧ ${b[1]} = ${out}`;
+      if (this.partners) {
+        const mark = x => x === null ? "?" : String(x);
+        const res = this.outcome === "silent" ? "?" : this.outcome === "approved" ? 1 : 0;
+        return `${mark(b[0])} ∧ ${mark(b[1])} = ${res}`;
+      }
       return `${this.rule.toUpperCase()}(${b.join(", ")}) = ${out}`;
     }
   }
@@ -630,6 +655,8 @@
       return "{" + [...v].map(([k, x]) => `${typeof k === "string" && ident.test(k) ? k : show(k, true)}: ${show(x, true)}`).join(", ") + "}";
     }
     if (v instanceof Verdict) {
+      if (v.outcome === "approved" || v.outcome === "rejected") return `<verdict ${v.coalition}: ${v.outcome} ${show(v.decision, true)} (${v.reason})>`;
+      if (v.outcome) return `<verdict ${v.coalition}: ${v.outcome} (${v.reason})>`;
       if (v.agreed) return `<verdict ${v.coalition}: agreed ${show(v.decision, true)} (${v.reason}, margin ${showNum(Math.round(v.margin * 100) / 100)})>`;
       return `<verdict ${v.coalition}: split (${v.reason})>`;
     }
@@ -1014,14 +1041,19 @@
     async execMatch(s, env) {
       const v = await this.eval(s.subject, env);
       if (!(v instanceof Verdict)) throw new GbnRuntimeError(`match needs a verdict, got a ${typeName(v)}`, s.line);
-      const arm = v.agreed ? s.agreed : s.split;
-      if (!arm) return;
-      const inner = new Env(env);
-      if (arm.name) {
-        await this.guardName(arm.name, s.line, "rebind");
-        inner.vars.set(arm.name, v.agreed ? v.decision : v.reason);
+      // The most specific arm wins: a bond's own outcome first, then agreed or split.
+      const umbrella = v.agreed ? "agreed" : "split";
+      for (const word of v.outcome ? [v.outcome, umbrella] : [umbrella]) {
+        const arm = s.arms[word];
+        if (!arm) continue;
+        const inner = new Env(env);
+        if (arm.name) {
+          await this.guardName(arm.name, s.line, "rebind");
+          inner.vars.set(arm.name, word === "approved" || word === "agreed" ? v.decision : v.reason);
+        }
+        await this.execBlock(arm.body, inner);
+        return;
       }
-      await this.execBlock(arm.body, inner);
     }
 
     // bonds
@@ -1126,18 +1158,37 @@
         }
         if (extra !== null && extra !== undefined) feelings.set(who, feelingText(extra));
         if (typeof answer === "string") answer = answer.trim();
-        ballots.push({ member: who, answer, bucket: await this.bucket(bond.key, answer, line, true), weight: 1 });
+        const sign = bond.key ? null : yesNo(answer);
+        const bucket = sign !== null ? "\u0000yes/no:" + sign : await this.bucket(bond.key, answer, line, true);
+        ballots.push({ member: who, answer, bucket, weight: 1 });
       }
       const settings = { rule: "unanimous", ruleArg: null, veto: [], hasTie: false, minVotes: 2 };
       const v = decide(bond.name, ballots, abstained, settings, line);
-      v.reason = abstained.size ? `no consent: ${[...abstained.keys()].join(" and ")} did not answer`
-        : v.agreed ? "both agree" : "the partners disagree";
+      let marks = new Map([[bond.humanName, yesNo(hA)], [bond.aiName, yesNo(aA)]]);
+      if (abstained.size) {
+        // Silence is its own state: not yes, not no, and never consent.
+        v.outcome = "silent";
+        v.reason = `no consent: ${[...abstained.keys()].join(" and ")} did not answer`;
+        for (const who of marks.keys()) {
+          if (abstained.has(who)) marks.set(who, null);
+          else if (marks.get(who) === null) marks.set(who, 1); // an open answer was given
+        }
+      } else if (v.agreed) {
+        if ([...marks.values()].every(m => m === 0)) { v.outcome = "rejected"; v.reason = "rejected together"; }
+        else { v.outcome = "approved"; v.reason = "both approve"; marks = new Map([...marks.keys()].map(k => [k, 1])); }
+      } else {
+        v.outcome = "disagreed";
+        v.reason = "the partners disagree";
+        // Open answers that differ: the human's answer leads, the AI's differs.
+        if ([...marks.values()].includes(null)) marks = new Map([[bond.humanName, 1], [bond.aiName, 0]]);
+      }
+      v.marks = marks;
       v.feelings = feelings;
       v.question = question;
       v.rule = "and";
       v.partners = [bond.humanName, bond.aiName];
       await bond.journal.append("decision", {
-        by: "both", question, text: `${question} (${v.reason})`, agreed: v.agreed, decision: v.decision,
+        by: "both", question, text: `${question} (${v.reason})`, outcome: v.outcome, agreed: v.agreed, decision: v.decision,
         votes: v.votes, gate: v.gate(), feelings: feelings.size ? feelings : null, abstained: abstained.size ? abstained : null,
       });
       return v;

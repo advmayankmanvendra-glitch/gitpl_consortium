@@ -360,7 +360,60 @@ class Bits(unittest.TestCase):
         self.assertEqual(output(src).splitlines(), [
             "1 ∧ 1 = 1 {Asha: 1, saathi: 1}",
             "1 ∧ 0 = 0 {Asha: 1, saathi: 0}",
-            "0 ∧ 1 = 0 {Asha: 0, saathi: 1}",
+            "? ∧ 0 = ? {Asha: none, saathi: 0}",
+        ])
+
+    def test_two_noes_are_a_mutual_rejection_not_an_approval(self):
+        src = BOND + '''
+        script_human(["no", "nahi"])
+        for q in ["rush?", "argue?"] {
+          let v = us(q)
+          print(v.outcome, v.gate, v.approved, v.agreed, v.reason)
+        }
+        '''
+        self.assertEqual(output(src).splitlines(), [
+            "rejected 0 ∧ 0 = 0 false true rejected together",
+            "rejected 0 ∧ 0 = 0 false true rejected together",
+        ])
+
+    def test_silence_is_its_own_state(self):
+        src = BOND + '''
+        script_human([none, "no"])
+        let quiet = us("together?")
+        let refused = us("together?")
+        print(quiet.outcome, quiet.gate, quiet.signal)
+        print(refused.outcome, refused.gate, refused.signal)
+        '''
+        self.assertEqual(output(src).splitlines(), [
+            "silent ? ∧ 1 = ? none",
+            "disagreed 0 ∧ 1 = 0 0b01",
+        ])
+
+    def test_yes_words_in_any_language_mean_the_same(self):
+        src = BOND + '''
+        script_human(["haan"])
+        let v = us("together?")
+        print(v.outcome, v.decision, v.gate)
+        '''
+        self.assertEqual(output(src), "approved haan 1 ∧ 1 = 1\n")
+
+    def test_match_picks_the_most_specific_arm(self):
+        src = BOND + '''
+        script_human(["no", "no", "yes", none])
+        for q in ["rush?", "rush?", "rush?", "rush?"] {
+          match us(q) {
+            approved d { print("approved", d) }
+            rejected why { print("rejected:", why) }
+            agreed d { print("agreed", d) }
+            split why { print("split:", why) }
+          }
+        }
+        '''
+        self.assertEqual(output(src).splitlines(), [
+            "rejected: rejected together",
+            "rejected: rejected together",
+            "split: the partners disagree",
+            "split: no consent: Asha did not answer",
         ])
 
     def test_coalition_gate(self):

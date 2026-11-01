@@ -62,10 +62,17 @@ class Verdict:
     question: object = None
     rule: str = ""
     partners: tuple = ()   # for a bond: (human name, ai name)
+    outcome: str = ""      # for a bond: approved, rejected, disagreed or silent
+    marks: dict = field(default_factory=dict)  # for a bond: partner -> 1, 0 or None (silent)
 
     FIELDS = ("agreed", "decision", "reason", "votes", "abstained", "dissent",
               "tally", "margin", "tiebreak", "coalition", "feelings", "question",
-              "bits", "signal", "gate", "rule")
+              "bits", "signal", "gate", "rule", "outcome", "approved")
+
+    @property
+    def approved(self):
+        """True only for a real yes: a bond's approval, or a coalition's agreement."""
+        return self.outcome == "approved" if self.partners else self.agreed
 
     def get(self, name):
         if name not in self.FIELDS:
@@ -74,19 +81,25 @@ class Verdict:
             return self.bits()
         if name == "gate":
             return self.gate()
+        if name == "outcome":
+            return self.outcome or ("agreed" if self.agreed else "split")
         if name == "signal":
             row = list(self.bits().values())
-            if not row:
+            if not row or None in row:
                 return None
             return Bits(int("".join(map(str, row)), 2), len(row))
         return getattr(self, name)
 
     def bits(self):
-        """Each voice as a bit: 1 if it stands with the decision (or the leading answer).
+        """Each voice as a bit.
 
-        For a bond both partners are listed, and a partner who did not answer is 0:
-        silence is never consent. For a coalition only voters are listed.
+        For a bond both partners are listed: 1 for yes, 0 for no, and none for a
+        partner who stayed silent, because silence is neither yes nor no.
+        For a coalition only voters are listed: 1 if they stand with the
+        decision (or the leading answer).
         """
+        if self.partners:
+            return dict(self.marks)
         if self.agreed:
             lead = {m for m in self.votes if m not in self.dissent}
         else:
@@ -99,7 +112,9 @@ class Verdict:
         bits = list(self.bits().values())
         out = 1 if self.agreed else 0
         if self.partners:
-            return f"{bits[0]} ∧ {bits[1]} = {out}"
+            mark = lambda b: "?" if b is None else str(b)
+            out = "?" if self.outcome == "silent" else (1 if self.outcome == "approved" else 0)
+            return f"{mark(bits[0])} ∧ {mark(bits[1])} = {out}"
         return f"{self.rule.upper()}({', '.join(map(str, bits))}) = {out}"
 
 
@@ -260,6 +275,10 @@ def show(v, quote=False):
     if isinstance(v, dict):
         return "{" + ", ".join(f"{_key(k)}: {show(x, True)}" for k, x in v.items()) + "}"
     if isinstance(v, Verdict):
+        if v.outcome in ("approved", "rejected"):
+            return f"<verdict {v.coalition}: {v.outcome} {show(v.decision, True)} ({v.reason})>"
+        if v.outcome:
+            return f"<verdict {v.coalition}: {v.outcome} ({v.reason})>"
         if v.agreed:
             return f"<verdict {v.coalition}: agreed {show(v.decision, True)} ({v.reason}, margin {show(round(v.margin, 2))})>"
         return f"<verdict {v.coalition}: split ({v.reason})>"

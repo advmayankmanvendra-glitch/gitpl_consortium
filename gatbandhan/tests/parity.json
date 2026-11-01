@@ -101,7 +101,7 @@
  },
  {
   "source": "member saathi(q) { if contains(lower(q), \"together\") { return \"yes\" with feeling \"hopeful\" } return \"no\" with feeling \"careful\" } bond us { human: \"Asha\" ai: saathi vow honesty: \"truth\" } script_human([{answer: \"Yes \", feeling: \"excited\"}, \"yes\"]) let a = us(\"Together?\") let b = us(\"Ship?\") let c = us(\"There?\") print(a, a.feelings, a.gate) print(b, b.votes, b.gate) print(c, c.abstained, c.gate, c.signal)",
-  "output": "<verdict us: agreed \"Yes\" (both agree, margin 1)> {Asha: \"excited\", saathi: \"hopeful\"} 1 ∧ 1 = 1\n<verdict us: split (the partners disagree)> {Asha: \"yes\", saathi: \"no\"} 1 ∧ 0 = 0\n<verdict us: split (no consent: Asha did not answer)> {Asha: \"did not answer\"} 0 ∧ 1 = 0 0b01\n"
+  "output": "<verdict us: approved \"Yes\" (both approve)> {Asha: \"excited\", saathi: \"hopeful\"} 1 ∧ 1 = 1\n<verdict us: disagreed (the partners disagree)> {Asha: \"yes\", saathi: \"no\"} 1 ∧ 0 = 0\n<verdict us: silent (no consent: Asha did not answer)> {Asha: \"did not answer\"} ? ∧ 0 = ? none\n"
  },
  {
   "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi vow honesty: \"truth\" } remember us \"We met.\" by human with feeling \"shy\" amend us 3 \"We met on a Saturday.\" vow us.kindness = \"Be patient.\" vow us.honesty = \"truth\" for e in memory(us) { print(e.n, e.kind, e.by, e.text, e.feeling, e.amends) } print(us.vows, us, us.human, us.ai, us.name, len(us.seal))",
@@ -149,7 +149,7 @@
  },
  {
   "source": "script(\"claude-test\", [{answer: \"yes\", feeling: \"warm\"}, \"\\{\\\"answer\\\": \\\"no\\\"\\}\"]) bond us { human: \"M\"  ai: \"claude-test\" } script_human([\"yes\", \"yes\"]) print(us(\"one?\"), us(\"two?\"))",
-  "output": "<verdict us: agreed \"yes\" (both agree, margin 1)> <verdict us: split (the partners disagree)>\n"
+  "output": "<verdict us: approved \"yes\" (both approve)> <verdict us: disagreed (the partners disagree)>\n"
  },
  {
   "source": "print(0b0101, type_of(0b0101), len(0b0101), num(0b0101), 0b1_0, 0b01 == 0b1, 0b1 == bits(1))",
@@ -234,5 +234,25 @@
  {
   "source": "print(\"{1 + 2} and {[1, {a: \"x\"}]}\")",
   "output": "GbnSyntaxError: line 1: unclosed '{' in string (write \\{ for a literal brace)\n"
+ },
+ {
+  "source": "fn s(q) { if q == \"quiet?\" { return none } if q == \"tea?\" { return \"chai\" } return \"no\" } bond us { human: \"Asha\", ai: s } script_human([\"nahi\", \"yes\", \"tea\", \"no\"]) for q in [\"rush?\", \"rush?\", \"tea?\", \"quiet?\"] { let v = us(q) print(v, v.outcome, v.gate, v.bits, v.signal, v.approved, v.agreed) }",
+  "output": "<verdict us: rejected \"nahi\" (rejected together)> rejected 0 ∧ 0 = 0 {Asha: 0, s: 0} 0b00 false true\n<verdict us: disagreed (the partners disagree)> disagreed 1 ∧ 0 = 0 {Asha: 1, s: 0} 0b10 false false\n<verdict us: disagreed (the partners disagree)> disagreed 1 ∧ 0 = 0 {Asha: 1, s: 0} 0b10 false false\n<verdict us: silent (no consent: s did not answer)> silent 0 ∧ ? = ? {Asha: 0, s: none} none false false\n"
+ },
+ {
+  "source": "fn s(q) { return \"Haan\" } bond us { human: \"M\", ai: s } script_human([\"ok\", \"true\", none]) for q in [\"a?\", \"b?\", \"c?\"] { match us(q) { approved d { print(\"approved\", d) } rejected w { print(\"rejected\", w) } disagreed w { print(\"disagreed\", w) } silent w { print(\"silent\", w) } } }",
+  "output": "approved ok\napproved true\nsilent no consent: M did not answer\n"
+ },
+ {
+  "source": "fn s(q) { return \"no\" } bond us { human: \"M\", ai: s } script_human([\"no\", \"yes\"]) for q in [\"a?\", \"b?\"] { match us(q) { agreed d { print(\"agreed\", d) } split w { print(\"split\", w) } } } print(len(us.memory))",
+  "output": "agreed no\nsplit the partners disagree\n3\n"
+ },
+ {
+  "source": "match 3 { approved d { print(d) } }",
+  "output": "GbnRuntimeError: line 1: match needs a verdict, got a num\n"
+ },
+ {
+  "source": "fn s(q) { return \"no\" } bond us { human: \"M\", ai: s } match us(\"x?\") { maybe d { print(d) } }",
+  "output": "GbnSyntaxError: line 1: expected an arm: approved, rejected, disagreed, silent, agreed or split (found 'maybe')\n"
  }
 ]

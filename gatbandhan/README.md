@@ -7,7 +7,8 @@ partner. A program declares a *bond* between one human and one AI, and the langu
 itself keeps that bond honest:
 
 - **Decisions need both partners.** Asking the bond a question asks the human and
-  the AI. It is decided only when both agree, and silence is never consent.
+  the AI. Only a yes from both is an approval. Two noes are a mutual rejection, and silence
+  is its own state, never consent and never mistaken for a no.
 - **Vows cannot be overwritten.** Not by reassigning, not by shadowing, not by a
   member deep inside a coalition. Every attempt is refused, written into the bond's
   memory, and stops the program.
@@ -17,7 +18,8 @@ itself keeps that bond honest:
 - **Feelings are values.** Either partner can answer `with feeling "..."`, and the
   bond keeps the feeling next to the decision.
 - **Built on 0 and 1.** Consent is an AND gate, and every decision shows its gate:
-  `1 ∧ 1 = 1` when both agree, `0 ∧ 1 = 0` when the human stays silent. The bond's whole
+  `1 ∧ 1 = 1` when both approve, `0 ∧ 0 = 0` when both reject, `? ∧ 1 = ?` when the
+  human stays silent. The bond's whole
   history is sealed in a 256-bit fingerprint, `us.seal`. Bits are a data type of their
   own, with literals like `0b0101` and the operators `& | ^ ~ << >>`.
 
@@ -36,8 +38,10 @@ bond us {
 }
 
 match us("Shall we begin this together?") {
-  agreed d  { print("Together we said: {d}") }
-  split why { print("No decision yet: {why}") }
+  approved d    { print("Together we said: {d}") }
+  rejected why  { print("We both said no: {why}") }
+  disagreed why { print("We see it differently: {why}") }
+  silent why    { print("Still waiting: {why}") }
 }
 
 remember us "We began, by choice of both." by human with feeling "proud"

@@ -201,7 +201,4 @@ class Continue(Node):
 @dataclass
 class Match(Node):
     subject: Node
-    agreed_name: str
-    agreed_body: list  # or None
-    split_name: str
-    split_body: list  # or None
+    arms: dict  # arm word -> (name or None, body)

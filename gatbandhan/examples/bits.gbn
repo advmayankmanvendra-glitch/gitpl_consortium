@@ -1,7 +1,8 @@
 # Everything a computer does starts with 0 and 1. So does a bond.
 #
 # Consent is an AND gate: a decision is 1 only when the human's bit and the
-# AI's bit are both 1. A partner who stays silent is 0.
+# AI's bit are both 1. Two noes are 0 ∧ 0 = 0, a mutual rejection. A partner
+# who stays silent is not a 0 but a "?", so the result is unknown too.
 
 member saathi(question) {
   if contains(question, "together") { return "yes" }
@@ -14,11 +15,11 @@ bond us {
   vow consent: "Neither of us decides alone."
 }
 
-script_human(["yes", "yes"])  # the third question gets no answer at all
+script_human(["yes", "yes", "no"])  # the fourth question gets no answer at all
 
-for q in ["Shall we build this together?", "Shall I decide this alone?", "Are you still there?"] {
+for q in ["Shall we build this together?", "Shall I decide this alone?", "Shall I rush this?", "Are you still there?"] {
   let v = us(q)
-  print("{v.gate}   {q}  ({v.reason})")
+  print("{v.gate}   {v.outcome}: {q}  ({v.reason})")
 }
 
 # Bits are a type of their own: a row of 0s and 1s with a fixed width.
