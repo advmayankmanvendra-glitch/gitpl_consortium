@@ -277,7 +277,7 @@
  },
  {
   "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, 3))",
-  "output": "GbnRuntimeError: line 1: propose(bond, text) needs a bond and a text\n"
+  "output": "GbnRuntimeError: line 1: propose(bond, text, options?) needs a bond and a text\n"
  },
  {
   "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") print(p.colour)",
@@ -286,5 +286,45 @@
  {
   "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let p = propose(us, \"a\") us(p) print(us.id, p.status) revise(p, \"b\")",
   "output": "ce83fc123efe8a76c247425b465c323bca849ae38cc4f208fb5dd15b1b6930da approved\nGbnRuntimeError: line 1: proposal 2 is already approved; a decided proposal is not revised, make a new one with propose()\n"
+ },
+ {
+  "source": "member s(q) { if contains(q, \"migrate\") { return objection(\"The backup is not tested\", \"Test a restore first\") with feeling \"worried\" } return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\", \"yes\", \"yes\", \"yes\", \"yes\", {answer: \"no\", reason: \"Too early\", condition: \"After the demo\"}]) let tests = propose(us, \"Run the test suite\", {standing: true}) let docs = propose(us, \"Write the guide\") let migrate = propose(us, \"migrate the database\") let release = propose(us, \"Release version 2\", {needs: [migrate]}) print(tests, tests.fingerprint, release.fingerprint, release.needs) print(us(tests).outcome, us(docs).outcome) for i in range(3) { let v = us(migrate) print(v, v.gate, v.objections) } print(migrate.status, migrate.objections) print(us(release).outcome, release.status, release.objections, release.blocked_by, release.ready) act(tests, fn() { print(\"running tests\") }) act(tests, fn() { print(\"again\") }) act(docs, fn() { print(\"writing\") }) print(tests.uses, docs.uses, docs.ready, tests.ready) for p in unresolved(us) { print(\"open:\", p) } revoke(tests) print(tests.status, tests.ready) for e in memory(us) { print(e.n, e.kind, e.text, e.objections) } act(release, fn() { print(\"never\") })",
+  "output": "<proposal 2 v1 standing pending: \"Run the test suite\"> 5a1aed46dccee6dec57c1955ad08b93cf9b004a47027e0d213167c7f9a03e03b 10f6a405f3495f0bbb9e134928b34218646612fd7e405e69be0461be1ef04474 [4]\napproved approved\n<verdict us: disagreed (the partners disagree)> 1 ∧ 0 = 0 {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n<verdict us: disagreed (the partners disagree)> 1 ∧ 0 = 0 {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n<verdict us: disagreed (the partners disagree)> 1 ∧ 0 = 0 {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\ndeadlocked [{round: 1, by: \"s\", reason: \"The backup is not tested\", condition: \"Test a restore first\"}, {round: 2, by: \"s\", reason: \"The backup is not tested\", condition: \"Test a restore first\"}, {round: 3, by: \"s\", reason: \"The backup is not tested\", condition: \"Test a restore first\"}]\ndisagreed disagreed [{round: 1, by: \"Asha\", reason: \"Too early\", condition: \"After the demo\"}] [4] false\nrunning tests\nagain\nwriting\n2 1 false true\nopen: <proposal 4 v1 deadlocked: \"migrate the database\">\nopen: <proposal 5 v1 disagreed: \"Release version 2\">\nrevoked false\n1 bond Asha and s formed the bond 'us' none\n2 proposal Run the test suite none\n3 proposal Write the guide none\n4 proposal migrate the database none\n5 proposal Release version 2 none\n6 decision Run the test suite (both approve) none\n7 decision Write the guide (both approve) none\n8 decision migrate the database (the partners disagree) {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n9 decision migrate the database (the partners disagree) {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n10 decision migrate the database (the partners disagree) {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n11 decision Release version 2 (the partners disagree) {Asha: {reason: \"Too early\", condition: \"After the demo\"}}\n12 act acted on proposal 2: Run the test suite none\n13 act acted on proposal 2: Run the test suite none\n14 act acted on proposal 3: Write the guide none\n15 revoke revoked proposal 2: Run the test suite none\nBondError: line 1: refused: act on proposal 5: it is disagreed, not approved by both. Only work both partners approved can run under the bond\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let p = propose(us, \"a\") us(p) act(p, fn() { print(\"once\") }) act(p, fn() { print(\"twice\") })",
+  "output": "once\nBondError: line 1: refused: act on proposal 2 again: it allowed one action and it was used. A one-time approval is never reused; propose again, or approve a standing permission\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") act(p, fn() { print(\"x\") })",
+  "output": "BondError: line 1: refused: act on proposal 2: it is pending, not approved by both. Only work both partners approved can run under the bond\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") revoke(p)",
+  "output": "GbnRuntimeError: line 1: proposal 2 is pending; only an approved proposal can be revoked\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, \"a\", {colour: \"red\"}))",
+  "output": "GbnRuntimeError: line 1: propose: options are a map with 'standing' and 'needs'\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, \"a\", {needs: [\"b\"]}))",
+  "output": "GbnRuntimeError: line 1: propose: 'needs' must be a list of proposals of the same bond\n"
+ },
+ {
+  "source": "print(objection(\"\"))",
+  "output": "GbnRuntimeError: line 1: objection(reason, condition?) needs a reason\n"
+ },
+ {
+  "source": "let o = objection(\"No time\", 3) print(o.reason, o.condition, o == objection(\"No time\", 3), o.size)",
+  "output": "GbnRuntimeError: line 1: an objection has no field 'size'\n"
+ },
+ {
+  "source": "script(\"m\", [\"\\{\\\"answer\\\": \\\"no\\\", \\\"reason\\\": \\\"Unsafe\\\", \\\"condition\\\": \\\"Add a check\\\"\\}\", {answer: \"yes\", reason: \"fine\"}]) bond us { human: \"Asha\" ai: \"m\" } script_human([\"yes\", \"yes\"]) let a = us(\"x?\") let b = us(\"y?\") print(a.outcome, a.objections, b.outcome, b.objections)",
+  "output": "disagreed {m: {reason: \"Unsafe\", condition: \"Add a check\"}} approved {}\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"no\", \"yes\"]) let p = propose(us, \"a\", {standing: true}) us(p) let q = revise(p, \"b\") print(q, q.standing) print(us(q).outcome) act(q, fn() { return 5 }) print(act(q, fn() { return 7 }))",
+  "output": "<proposal 4 v2 standing pending: \"b\"> true\napproved\n7\n"
  }
 ]

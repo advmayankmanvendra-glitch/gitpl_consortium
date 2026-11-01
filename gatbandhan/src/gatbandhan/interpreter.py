@@ -11,7 +11,7 @@ from .errors import GatbandhanError, GbnRuntimeError
 from .journal import Journal, utc_now
 from .models import Human, Models
 from .parser import parse
-from .values import (Bits, Bond, Proposal, Builtin, Callable, Coalition, Function, Member,
+from .values import (Bits, Bond, Objection, Proposal, yes_no, Builtin, Callable, Coalition, Function, Member,
                      SealedError, Verdict, freeze, seal, show, type_name, unseal)
 
 
@@ -55,23 +55,13 @@ class Env:
 MAX_DEPTH = 200
 
 
-YES_WORDS = {"yes", "y", "yeah", "yep", "haan", "haa", "ha", "ji", "ok", "okay", "sure",
-             "agree", "agreed", "approve", "approved", "true"}
-NO_WORDS = {"no", "n", "nope", "nahi", "nahin", "na", "disagree", "reject", "rejected",
-            "never", "false"}
-
-
-def _yes_no(answer):
-    """1 for a yes, 0 for a no, None for silence or an open answer (like "tea")."""
-    if isinstance(answer, bool):
-        return 1 if answer else 0
-    if isinstance(answer, str):
-        word = answer.strip().lower().rstrip(".!")
-        if word in YES_WORDS:
-            return 1
-        if word in NO_WORDS:
-            return 0
-    return None
+def objection_from(reply):
+    """The answer in a reply map; a no that gives a "reason" becomes an Objection."""
+    answer = reply.get("answer")
+    reason = reply.get("reason")
+    if isinstance(reason, str) and reason.strip() and yes_no(answer) == 0:
+        return Objection(reason.strip(), reply.get("condition"))
+    return answer
 
 
 class Interpreter:
@@ -331,16 +321,17 @@ class Interpreter:
         vows = "; ".join(f"{k}: {show(v)}" for k, v in bond.vows.items()) or "none yet"
         system = (f"You are {bond.ai_name}, the AI partner in a bond named '{bond.name}' with "
                   f"{bond.human_name}. Your shared vows: {vows}. Answer the question honestly. "
-                  'Reply only with JSON: {"answer": <short answer>, "feeling": <one word or phrase>}.')
+                  'Reply only with JSON: {"answer": <short answer>, "feeling": <one word or phrase>}. '
+                  'If your answer is no, you may add "reason" (why) and "condition" (what would change it).')
         reply = self.models.consult(ai, question, system=system, line=line)
+        if not isinstance(reply, dict):
+            try:
+                data = json.loads(reply)
+                reply = data if isinstance(data, dict) and "answer" in data else reply
+            except (TypeError, ValueError):
+                pass
         if isinstance(reply, dict):
-            return reply.get("answer"), reply.get("feeling")
-        try:
-            data = json.loads(reply)
-            if isinstance(data, dict) and "answer" in data:
-                return data.get("answer"), data.get("feeling")
-        except (TypeError, ValueError):
-            pass
+            return objection_from(reply), reply.get("feeling")
         return reply, None
 
     def call_bond(self, bond, args, line):
@@ -360,11 +351,18 @@ class Interpreter:
             question = show(args[0])
         ballots, abstained, feelings = [], {}, {}
 
-        h_answer, h_feeling = self.human.answer(bond.human_name, question)
+        h_answer, h_feeling, h_objection = self.human.answer(bond.human_name, question)
         ai_answer, ai_extra = self.consult_partner(bond, question, line)
+        if h_objection is not None and yes_no(h_answer) == 0:
+            h_answer = h_objection
+        objections = {}
 
         for who, answer, extra in ((bond.human_name, h_answer, h_feeling),
                                    (bond.ai_name, ai_answer, ai_extra)):
+            if isinstance(answer, Objection):
+                # A "no" that says why: the vote is a no, and the reason is kept with it.
+                objections[who] = {"reason": answer.reason, "condition": answer.condition}
+                answer = "no"
             if answer is None:
                 abstained[who] = extra if isinstance(extra, str) and extra else "did not answer"
                 continue
@@ -372,12 +370,12 @@ class Interpreter:
                 feelings[who] = _feeling(extra)
             if isinstance(answer, str):
                 answer = answer.strip()
-            sign = _yes_no(answer) if bond.key is None else None
+            sign = yes_no(answer) if bond.key is None else None
             bucket = ("yes/no", sign) if sign is not None else self.bucket(bond.key, answer, line, default_fold=True)
             ballots.append(Ballot(who, answer, bucket, 1.0))
 
         verdict = decide(bond.name, ballots, abstained, Settings(rule="unanimous", min_votes=2), line)
-        marks = {who: _yes_no(ans) for who, ans in ((bond.human_name, h_answer), (bond.ai_name, ai_answer))}
+        marks = {who: yes_no(ans) for who, ans in ((bond.human_name, h_answer), (bond.ai_name, ai_answer))}
         if abstained:
             # Silence is its own state: not yes, not no, and never consent.
             verdict.outcome = "silent"
@@ -407,12 +405,14 @@ class Interpreter:
         verdict.rule = "and"
         verdict.partners = (bond.human_name, bond.ai_name)
         verdict.proposal = proposal
+        verdict.objections = objections
         bond.journal.append("decision", by="both", question=question, text=f"{question} ({verdict.reason})",
                             proposal=proposal.fingerprint if proposal else None,
                             proposal_id=proposal.id if proposal else None,
                             outcome=verdict.outcome, agreed=verdict.agreed,
                             decision=verdict.decision, votes=verdict.votes, gate=verdict.gate(),
-                            feelings=feelings or None, abstained=abstained or None)
+                            feelings=feelings or None, abstained=abstained or None,
+                            objections=objections or None)
         return verdict
 
     # ---- members and coalitions ----
@@ -701,9 +701,10 @@ class Interpreter:
     def field(self, obj, name, line):
         if isinstance(obj, dict):
             return obj.get(name)
-        if isinstance(obj, (Verdict, Bond, Proposal)):
+        if isinstance(obj, (Verdict, Bond, Proposal, Objection)):
             if name not in obj.FIELDS:
-                raise GbnRuntimeError(f"a {type_name(obj)} has no field '{name}'", line)
+                kind = type_name(obj)
+                raise GbnRuntimeError(f"{'an' if kind[0] in 'aeiou' else 'a'} {kind} has no field '{name}'", line)
             return obj.get(name)
         if isinstance(obj, (Member, Coalition, Function)) and name == "name":
             return obj.name
