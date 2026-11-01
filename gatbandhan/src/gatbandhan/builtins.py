@@ -1,7 +1,8 @@
 """Built-in functions."""
 
 from .errors import GbnRuntimeError
-from .values import Bits, Bond, Builtin, Coalition, show, type_name, unseal
+from .journal import fingerprint
+from .values import Bits, Bond, Builtin, Coalition, Proposal, show, type_name, unseal
 
 VERSION = "0.1.0"
 
@@ -47,6 +48,10 @@ def install(interp):
     special("history", _history)
     special("vows", lambda it, args, line: _bond(it, args, line, "vows").get("vows"))
     special("memory", lambda it, args, line: _bond(it, args, line, "memory").get("memory"))
+    special("propose", _propose)
+    special("revise", _revise)
+    special("proposals", lambda it, args, line: [Proposal(b, e) for b in [_bond(it, args, line, "proposals")]
+                                                 for e in b.journal.entries if e["kind"] == "proposal"])
     plain("bits", _bits)
     plain("version", lambda: VERSION)
 
@@ -166,6 +171,32 @@ def _history(it, args, line):
     if not isinstance(c, Coalition):
         raise GbnRuntimeError("history(c) needs a coalition", line)
     return list(c.history)
+
+
+def _add_proposal(bond, text, version, replaces):
+    n = len(bond.journal.entries) + 1
+    fp = fingerprint({"bond": bond.get("id"), "n": n, "text": text, "version": version, "replaces": replaces})
+    entry = bond.journal.append("proposal", text=text, version=version, replaces=replaces, fingerprint=fp)
+    return Proposal(bond, entry)
+
+
+def _propose(it, args, line):
+    if len(args) != 2 or not isinstance(args[0], Bond) or not isinstance(args[1], str):
+        raise GbnRuntimeError("propose(bond, text) needs a bond and a text", line)
+    return _add_proposal(args[0], args[1], 1, None)
+
+
+def _revise(it, args, line):
+    if len(args) != 2 or not isinstance(args[0], Proposal) or not isinstance(args[1], str):
+        raise GbnRuntimeError("revise(proposal, text) needs a proposal and a text", line)
+    p = args[0]
+    status = p.status()
+    if status == "replaced":
+        raise GbnRuntimeError(f"proposal {p.id} was already revised; revise its newest version", line)
+    if status in ("approved", "rejected"):
+        raise GbnRuntimeError(f"proposal {p.id} is already {status}; a decided proposal is not revised, "
+                              "make a new one with propose()", line)
+    return _add_proposal(p.bond, args[1], p.version + 1, p.id)
 
 
 def _bond(it, args, line, fn):

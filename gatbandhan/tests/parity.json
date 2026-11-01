@@ -254,5 +254,37 @@
  {
   "source": "fn s(q) { return \"no\" } bond us { human: \"M\", ai: s } match us(\"x?\") { maybe d { print(d) } }",
   "output": "GbnSyntaxError: line 1: expected an arm: approved, rejected, disagreed, silent, agreed or split (found 'maybe')\n"
+ },
+ {
+  "source": "member s(q) { if contains(q, \"tests\") { return \"yes\" with feeling \"calm\" } return \"no\" } bond us { human: \"Asha\" ai: s } script_human([none, \"yes\", \"yes\"]) let p = propose(us, \"Ship version 2\") print(p, p.status, p.rounds, p.fingerprint) us(p) print(p.status) let v = us(p) print(v.outcome, p.status, p.rounds) let p2 = revise(p, \"Ship version 2 after the tests pass\") print(p.status, p2, p2.replaces, p2.version, p2.fingerprint, p2 == p, p == p) let w = us(p2) print(w.outcome, w.proposal, p2.status, len(proposals(us)), us.seal) for e in memory(us) { print(e.n, e.kind, e.text, e.proposal_id, e.outcome) }",
+  "output": "<proposal 2 v1 pending: \"Ship version 2\"> pending 0 6756287bb4c6dcab592e507ec3ba76aec69ed302813d8273c8fb7d520f80bbaf\npending\ndisagreed disagreed 2\nreplaced <proposal 5 v2 pending: \"Ship version 2 after the tests pass\"> 2 2 a840b655246967d493373ba7b0156ce229f144296c0a25f38eff4b3f28e37d73 false true\napproved <proposal 5 v2 approved: \"Ship version 2 after the tests pass\"> approved 2 53976756a712d7e6443a3bb897f8d22ea974d463ef808d962cbcdf8e565dfb11\n1 bond Asha and s formed the bond 'us' none none\n2 proposal Ship version 2 none none\n3 decision Ship version 2 (no consent: Asha did not answer) 2 silent\n4 decision Ship version 2 (the partners disagree) 2 disagreed\n5 proposal Ship version 2 after the tests pass none none\n6 decision Ship version 2 after the tests pass (both approve) 5 approved\n"
+ },
+ {
+  "source": "member s(q) { return \"no\" } bond us { human: \"Asha\" ai: s } script_human([\"no\"]) let p = propose(us, \"Rush\") us(p) print(p.status) us(p)",
+  "output": "rejected\nBondError: line 1: refused: ask proposal 2 again: it is already rejected. A decided proposal stays decided, and an old version is never reused; revise it to ask again\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") let q = revise(p, \"b\") print(q.bond, q.replaces) us(p)",
+  "output": "us 2\nBondError: line 1: refused: ask proposal 2 again: it is already replaced. A decided proposal stays decided, and an old version is never reused; revise it to ask again\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") revise(p, \"b\") revise(p, \"c\")",
+  "output": "GbnRuntimeError: line 1: proposal 2 was already revised; revise its newest version\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } bond them { human: \"Ravi\" ai: s } let p = propose(us, \"a\") them(p)",
+  "output": "GbnRuntimeError: line 1: proposal 2 belongs to bond 'us', not 'them'\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, 3))",
+  "output": "GbnRuntimeError: line 1: propose(bond, text) needs a bond and a text\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") print(p.colour)",
+  "output": "GbnRuntimeError: line 1: a proposal has no field 'colour'\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let p = propose(us, \"a\") us(p) print(us.id, p.status) revise(p, \"b\")",
+  "output": "ce83fc123efe8a76c247425b465c323bca849ae38cc4f208fb5dd15b1b6930da approved\nGbnRuntimeError: line 1: proposal 2 is already approved; a decided proposal is not revised, make a new one with propose()\n"
  }
 ]

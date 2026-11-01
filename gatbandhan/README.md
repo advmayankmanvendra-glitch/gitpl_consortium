@@ -9,6 +9,9 @@ itself keeps that bond honest:
 - **Decisions need both partners.** Asking the bond a question asks the human and
   the AI. Only a yes from both is an approval. Two noes are a mutual rejection, and silence
   is its own state, never consent and never mistaken for a no.
+- **Proposals keep their word.** A proposal has its own SHA-256 fingerprint and waits,
+  even across runs, until both decide. An approval belongs to that exact text: revise
+  it and both must approve again, and a decided proposal is never decided twice.
 - **Vows cannot be overwritten.** Not by reassigning, not by shadowing, not by a
   member deep inside a coalition. Every attempt is refused, written into the bond's
   memory, and stops the program.
@@ -111,6 +114,7 @@ the tests yet.
 | [coalition.gbn](examples/coalition.gbn) | weighted votes, abstentions, errors, learned trust |
 | [nested.gbn](examples/nested.gbn) | coalitions of coalitions and of models |
 | [bits.gbn](examples/bits.gbn) | consent as an AND gate, the bits type, the bond's 256-bit seal |
+| [proposals.gbn](examples/proposals.gbn) | a proposal that waits, is revised, and is approved only in its new version |
 
 The full language is described in [docs/SPEC.md](docs/SPEC.md).
 

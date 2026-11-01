@@ -36,6 +36,12 @@ def _digest(prev, body):
     return hashlib.sha256((prev + text).encode("utf-8")).hexdigest()
 
 
+def fingerprint(obj):
+    """SHA-256 of a value written as canonical JSON (sorted keys, no spaces)."""
+    text = json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -45,8 +51,10 @@ class Journal:
         self.path = path
         self.clock = clock
         self.entries = []
+        self._size = 0   # how much of the file this journal has read or written
         if path and os.path.exists(path):
             self._load()
+            self._size = os.path.getsize(path)
 
     def _load(self):
         prev = GENESIS
@@ -77,10 +85,17 @@ class Journal:
                 body[k] = _jsonable(v)
         entry = dict(body, hash=_digest(body["prev"], body))
         if self.path:
+            size = os.path.getsize(self.path) if os.path.exists(self.path) else 0
+            if size != self._size:
+                # Someone else wrote to (or cut) the file since we read it. Appending now
+                # would fork the history, so stop instead.
+                raise GbnRuntimeError(f"bond journal {self.path} was changed by another program while this one "
+                                      "was running; run again to continue from the new history")
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
+                self._size = f.tell()
         self.entries.append(entry)
         return entry
 

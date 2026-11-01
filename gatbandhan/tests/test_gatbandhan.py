@@ -438,6 +438,115 @@ class Bits(unittest.TestCase):
         self.assertEqual(output(src), "0b11 0b10\n")
 
 
+class Proposals(unittest.TestCase):
+    def test_a_proposal_has_a_fingerprint_and_starts_pending(self):
+        out, _ = run(BOND + '''
+        let p = propose(us, "Build this together")
+        print(p, p.version, len(p.fingerprint), p.rounds, type_of(p))
+        ''')
+        self.assertEqual(out, '<proposal 3 v1 pending: "Build this together"> 1 64 0 proposal\n')
+
+    def test_silence_keeps_it_pending_and_disagreement_is_remembered(self):
+        out, it = run(BOND + '''
+        script_human([none, "no", "yes"])
+        let p = propose(us, "Do this together")
+        us(p) print(p.status)
+        us(p) print(p.status)
+        let v = us(p) print(p.status, p.rounds, v.proposal == p)
+        ''')
+        self.assertEqual(out, "pending\ndisagreed\napproved 3 true\n")
+        decisions = it.bonds["us"].journal.find("decision")
+        fp = it.bonds["us"].journal.find("proposal")[0]["fingerprint"]
+        self.assertEqual([d["proposal"] for d in decisions], [fp, fp, fp])
+
+    def test_a_decided_proposal_cannot_be_decided_again(self):
+        for answer, status in (("yes", "approved"), ("no", "rejected")):
+            src = PARTNER + '''
+            bond us { human: "Asha" ai: saathi }
+            script_human(["%s", "yes"])
+            let p = propose(us, "Rush this")
+            if "%s" == "yes" { p = propose(us, "Do this together") }
+            us(p)
+            us(p)
+            ''' % (answer, answer)
+            with self.assertRaises(BondError) as ctx:
+                run(src)
+            self.assertIn(f"it is already {status}", str(ctx.exception))
+
+    def test_an_old_approval_never_covers_a_revised_proposal(self):
+        # The AI said yes to version 1; that yes does not count for version 2.
+        src = BOND + '''
+        script_human(["no", "yes"])
+        let p = propose(us, "Do this together")
+        us(p)
+        let p2 = revise(p, "Do this together, carefully")
+        print(p.status, p2.status, p2.rounds, p2.version, p2.replaces, p2 == p)
+        print(us(p2).outcome, p2.status, p2.rounds)
+        '''
+        self.assertEqual(output(src), "replaced pending 0 2 3 false\napproved approved 1\n")
+
+    def test_a_decided_proposal_is_not_revised(self):
+        for answer, status in (("yes", "approved"), ("no", "rejected")):
+            src = PARTNER + '''
+            bond us { human: "Asha" ai: saathi }
+            script_human(["%s"])
+            let p = propose(us, "Rush this")
+            if "%s" == "yes" { p = propose(us, "Do this together") }
+            us(p)
+            revise(p, "Something else")
+            ''' % (answer, answer)
+            with self.assertRaises(GbnRuntimeError) as ctx:
+                run(src)
+            self.assertIn(f"already {status}", str(ctx.exception))
+
+    def test_same_named_bonds_give_different_fingerprints(self):
+        prints = []
+        for clock in ("2026-11-01T10:00:00+00:00", "2026-11-01T10:00:01+00:00"):
+            out = io.StringIO()
+            it = Interpreter(out=out, stdin=io.StringIO(), clock=lambda c=clock: c)
+            it.run(BOND + 'let p = propose(us, "Same words") print(us.id, p.fingerprint)')
+            prints.append(out.getvalue().split())
+        self.assertNotEqual(prints[0][0], prints[1][0])
+        self.assertNotEqual(prints[0][1], prints[1][1])
+
+    def test_a_second_writer_is_stopped_instead_of_forking_history(self):
+        from gatbandhan.journal import Journal
+        path = os.path.join(tempfile.mkdtemp(), "us.journal")
+        first = Journal(path, clock=CLOCK)
+        first.append("bond", text="formed")
+        second = Journal(path, clock=CLOCK)       # opens the same memory
+        second.append("memory", text="from the second program")
+        with self.assertRaises(GbnRuntimeError):
+            first.append("memory", text="from the first program")
+        self.assertEqual(len(Journal(path, clock=CLOCK).entries), 2)
+
+    def test_an_old_version_cannot_be_reused(self):
+        src = BOND + '''
+        script_human(["yes"])
+        let p = propose(us, "Do this together")
+        let p2 = revise(p, "Do this together, carefully")
+        us(p)
+        '''
+        with self.assertRaises(BondError) as ctx:
+            run(src)
+        self.assertIn("already replaced", str(ctx.exception))
+        with self.assertRaises(GbnRuntimeError):
+            run(BOND + 'let p = propose(us, "a") revise(p, "b") revise(p, "c")')
+
+    def test_proposals_wait_across_runs(self):
+        d = tempfile.mkdtemp()
+        kept = PARTNER + 'bond us { human: "Asha" ai: saathi keep: "us.journal" }\n'
+        run(kept + 'script_human([none]) us(propose(us, "Do this together"))', base_dir=d)
+        out, _ = run(kept + '''
+        let waiting = []
+        for p in proposals(us) { if p.status == "pending" { push(waiting, p) } }
+        print(len(waiting), waiting[0].rounds)
+        script_human(["yes"])
+        print(us(waiting[0]).outcome, waiting[0].status)
+        ''', base_dir=d)
+        self.assertEqual(out, "1 1\napproved approved\n")
+
+
 class KeptBonds(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()

@@ -11,7 +11,7 @@ from .errors import GatbandhanError, GbnRuntimeError
 from .journal import Journal, utc_now
 from .models import Human, Models
 from .parser import parse
-from .values import (Bits, Bond, Builtin, Callable, Coalition, Function, Member,
+from .values import (Bits, Bond, Proposal, Builtin, Callable, Coalition, Function, Member,
                      SealedError, Verdict, freeze, seal, show, type_name, unseal)
 
 
@@ -105,10 +105,10 @@ class Interpreter:
 
     # ---- the bond's protections ----
 
-    def refuse(self, bond, what, line):
+    def refuse(self, bond, what, line, why=None):
         """Record a refused overwrite in the bond's memory, then stop the program."""
         bond.journal.append("refused", by="program", text=what, line=line)
-        raise BondError(f"refused: {what}. The bond '{bond.name}' cannot be overwritten", line)
+        raise BondError(f"refused: {what}. {why or f'The bond {chr(39)}{bond.name}{chr(39)} cannot be overwritten'}", line)
 
     def guard_name(self, name, line, action="rebind"):
         if name in self.bonds:
@@ -346,7 +346,18 @@ class Interpreter:
     def call_bond(self, bond, args, line):
         if len(args) != 1:
             raise GbnRuntimeError(f"a bond is asked one question at a time, got {len(args)} arguments", line)
-        question = show(args[0])
+        proposal = args[0] if isinstance(args[0], Proposal) else None
+        if proposal is not None:
+            if proposal.bond is not bond:
+                raise GbnRuntimeError(f"proposal {proposal.id} belongs to bond '{proposal.bond.name}', not '{bond.name}'", line)
+            status = proposal.status()
+            if status in ("approved", "rejected", "replaced"):
+                # A decided proposal is never decided again, and an old version is never reused.
+                self.refuse(bond, f"ask proposal {proposal.id} again: it is already {status}", line,
+                            "A decided proposal stays decided, and an old version is never reused; revise it to ask again")
+            question = proposal.text
+        else:
+            question = show(args[0])
         ballots, abstained, feelings = [], {}, {}
 
         h_answer, h_feeling = self.human.answer(bond.human_name, question)
@@ -395,7 +406,10 @@ class Interpreter:
         verdict.question = question
         verdict.rule = "and"
         verdict.partners = (bond.human_name, bond.ai_name)
+        verdict.proposal = proposal
         bond.journal.append("decision", by="both", question=question, text=f"{question} ({verdict.reason})",
+                            proposal=proposal.fingerprint if proposal else None,
+                            proposal_id=proposal.id if proposal else None,
                             outcome=verdict.outcome, agreed=verdict.agreed,
                             decision=verdict.decision, votes=verdict.votes, gate=verdict.gate(),
                             feelings=feelings or None, abstained=abstained or None)
@@ -687,7 +701,7 @@ class Interpreter:
     def field(self, obj, name, line):
         if isinstance(obj, dict):
             return obj.get(name)
-        if isinstance(obj, (Verdict, Bond)):
+        if isinstance(obj, (Verdict, Bond, Proposal)):
             if name not in obj.FIELDS:
                 raise GbnRuntimeError(f"a {type_name(obj)} has no field '{name}'", line)
             return obj.get(name)
