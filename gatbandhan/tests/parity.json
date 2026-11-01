@@ -100,8 +100,8 @@
   "output": "{warm: \"glad\"}\n"
  },
  {
-  "source": "member saathi(q) { if contains(lower(q), \"public\") { return \"yes\" with feeling \"hopeful\" } return \"no\" with feeling \"careful\" } bond us { human: \"Mayank\" ai: saathi vow honesty: \"truth\" } script_human([{answer: \"Yes \", feeling: \"excited\"}, \"yes\"]) let a = us(\"Stay public?\") let b = us(\"Ship?\") let c = us(\"There?\") print(a, a.feelings, a.gate) print(b, b.votes, b.gate) print(c, c.abstained, c.gate, c.signal)",
-  "output": "<verdict us: agreed \"Yes\" (both agree, margin 1)> {Mayank: \"excited\", saathi: \"hopeful\"} 1 ∧ 1 = 1\n<verdict us: split (the partners disagree)> {Mayank: \"yes\", saathi: \"no\"} 1 ∧ 0 = 0\n<verdict us: split (no consent: Mayank did not answer)> {Mayank: \"did not answer\"} 0 ∧ 1 = 0 0b01\n"
+  "source": "member saathi(q) { if contains(lower(q), \"together\") { return \"yes\" with feeling \"hopeful\" } return \"no\" with feeling \"careful\" } bond us { human: \"Asha\" ai: saathi vow honesty: \"truth\" } script_human([{answer: \"Yes \", feeling: \"excited\"}, \"yes\"]) let a = us(\"Together?\") let b = us(\"Ship?\") let c = us(\"There?\") print(a, a.feelings, a.gate) print(b, b.votes, b.gate) print(c, c.abstained, c.gate, c.signal)",
+  "output": "<verdict us: agreed \"Yes\" (both agree, margin 1)> {Asha: \"excited\", saathi: \"hopeful\"} 1 ∧ 1 = 1\n<verdict us: split (the partners disagree)> {Asha: \"yes\", saathi: \"no\"} 1 ∧ 0 = 0\n<verdict us: split (no consent: Asha did not answer)> {Asha: \"did not answer\"} 0 ∧ 1 = 0 0b01\n"
  },
  {
   "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi vow honesty: \"truth\" } remember us \"We met.\" by human with feeling \"shy\" amend us 3 \"We met on a Saturday.\" vow us.kindness = \"Be patient.\" vow us.honesty = \"truth\" for e in memory(us) { print(e.n, e.kind, e.by, e.text, e.feeling, e.amends) } print(us.vows, us, us.human, us.ai, us.name, len(us.seal))",
