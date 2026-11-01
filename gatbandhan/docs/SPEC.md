@@ -11,7 +11,8 @@ Files use the extension `.gbn` and are UTF-8 text.
 
 1. **Neither partner decides alone.** A bond's decision stands only when the human and
    the AI give the same answer.
-2. **Silence is not consent.** A partner who does not answer blocks the decision.
+2. **Silence is not consent, and it is not refusal either.** A partner who does not
+   answer blocks the decision, and the silence is recorded as its own state.
 3. **What is promised stays promised.** A vow, once made, can never take another value.
 4. **History is never rewritten.** Memory can be added to and amended, never changed or
    erased, and every refused attempt is itself remembered.
@@ -32,7 +33,7 @@ Files use the extension `.gbn` and are UTF-8 text.
 - Keywords: `let fn member coalition bond vow remember amend with by return abstain if
   else while for in break continue match true false none and or not`.
 - Contextual words, which are ordinary names elsewhere: `trust` (after a member's
-  parameters), `feeling` (after `with`), `agreed` and `split` (in `match`), `human` and
+  parameters), `feeling` (after `with`), `approved`, `rejected`, `disagreed`, `silent`, `agreed` and `split` (in `match`), `human` and
   `ai` (in a bond and after `by`), and coalition and bond field names.
 
 ## 3. Values
@@ -178,10 +179,25 @@ bond us {
   name, the model is consulted with a system message naming the bond, the partners and
   the vows, and asked for `{"answer": ..., "feeling": ...}` JSON.
 - Text answers are compared trimmed and case-insensitively unless `key` is given.
+- Without a `key`, words that mean yes are the same answer, and so are words that mean
+  no, in English or Hindi: yes, y, yeah, yep, haan, haa, ha, ji, ok, okay, sure, agree,
+  agreed, approve, approved, true; and no, n, nope, nahi, nahin, na, disagree, reject,
+  rejected, never, false. A final `.` or `!` is ignored.
 
-The verdict agrees ("both agree") only when both answered the same. Otherwise it splits
-with "the partners disagree" or "no consent: X did not answer". Every decision is written
-to the bond's memory with the question, both votes and both feelings.
+Every question ends in exactly one of four **outcomes**, kept in `outcome`:
+
+| Outcome | When | `agreed` | `approved` | Gate | Reason |
+| --- | --- | --- | --- | --- | --- |
+| `approved` | both gave the same answer, and it is not a no | true | true | `1 ∧ 1 = 1` | `both approve` |
+| `rejected` | both said no | true | false | `0 ∧ 0 = 0` | `rejected together` |
+| `disagreed` | both answered, differently | false | false | `1 ∧ 0 = 0` or `0 ∧ 1 = 0` | `the partners disagree` |
+| `silent` | at least one partner did not answer | false | false | `? ∧ 1 = ?` and so on | `no consent: X did not answer` |
+
+Only `approved` is a commitment. A mutual rejection is agreement that the answer is no:
+the partners' answers match, but nothing was approved. Silence is not a 0: a silent
+partner's bit is `none` (shown as `?` in the gate), and the gate's result is unknown.
+Every decision is written to the bond's memory with its outcome, the question, both
+votes and both feelings.
 
 ### 7.2 Vows
 
@@ -237,9 +253,11 @@ evident, not impossible.
 
 | Field | Meaning |
 | --- | --- |
-| `agreed` | whether a decision was reached |
+| `outcome` | for a bond: `approved`, `rejected`, `disagreed` or `silent`; for a coalition: `agreed` or `split` |
+| `approved` | for a bond, true only when both said yes to the same thing; for a coalition, the same as `agreed` |
+| `agreed` | whether a decision was reached (for a bond: whether the answers match, so a mutual rejection is agreed but not approved) |
 | `decision` | the decided answer, or `none` |
-| `reason` | why, for example `majority`, `vetoed by m`, `both agree` |
+| `reason` | why, for example `majority`, `vetoed by m`, `both approve` |
 | `votes` | map of voter name to answer |
 | `abstained` | map of member name to the reason it did not vote |
 | `dissent` | voters whose answer differs from the decision |
@@ -250,23 +268,34 @@ evident, not impossible.
 | `question` | for a bond, the question asked |
 | `rule` | the rule used, for example `majority` or `threshold 0.7`; `and` for a bond |
 | `bits` | map of each voice to a bit (see below) |
-| `signal` | the same bits as a `bits` value, for example `0b11` for a bond's consent |
+| `signal` | the same bits as a `bits` value, for example `0b11` for a bond's consent; `none` when a partner was silent |
 | `gate` | the decision written as a logic gate, for example `1 ∧ 1 = 1` |
 
 **Bits and gates.** Every decision is also a small circuit. A voice's bit is 1 when it
 stands with the decision, or with the leading answer when there is none, and 0 otherwise.
-A bond lists both partners, and a partner who did not answer is 0, so a bond's gate is
-an AND gate: `1 ∧ 1 = 1` is consent, `1 ∧ 0 = 0` is disagreement, `0 ∧ 1 = 0` is
-silence. A coalition's gate is named after its rule, for example `MAJORITY(1, 1, 0) = 1`.
+A bond lists both partners with three possible marks: 1 for yes (or for an answer that
+leads), 0 for no (or for an answer that differs), and `none` for silence. A bond's gate
+is an AND gate: `1 ∧ 1 = 1` is consent, `0 ∧ 0 = 0` is a mutual rejection, `1 ∧ 0 = 0`
+is disagreement, and `1 ∧ ? = ?` is silence. The gate alone does not tell rejection
+from disagreement, so read `outcome` too. A coalition's gate is named after its rule,
+for example `MAJORITY(1, 1, 0) = 1`.
 
 ```gbn
 match verdict {
-  agreed d  { ... }    # d is the decision
-  split why { ... }    # why is the reason
+  approved d      { ... }    # a bond: both said yes; d is the decision
+  rejected why    { ... }    # a bond: both said no
+  disagreed why   { ... }    # a bond: the partners answered differently
+  silent why      { ... }    # a bond: someone did not answer
+  agreed d        { ... }    # any verdict whose answers match (approved or rejected)
+  split why       { ... }    # any verdict with no decision (disagreed or silent)
 }
 ```
 
-Either arm may be left out, and the names after `agreed` and `split` are optional.
+The most specific arm wins: for a bond, the arm named after its outcome runs if there
+is one, otherwise `agreed` or `split`. A coalition only uses `agreed` and `split`.
+Every arm may be left out, and the names after the arm words are optional. The name is
+the decision after `approved` and `agreed`, and the reason after the others. Code that
+acts on a commitment should use `approved`, because `agreed` also covers a mutual no.
 
 ## 9. Built-in functions
 

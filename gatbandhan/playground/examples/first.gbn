@@ -22,8 +22,10 @@ bond us {
 for question in ["Shall we build Gatbandhan together?", "Should one of us decide alone?"] {
   let v = us(question)
   match v {
-    agreed d { print("{v.gate}  Together we said: {d}") }
-    split why { print("{v.gate}  No decision: {why}") }
+    approved d { print("{v.gate}  Together we said: {d}") }
+    rejected why { print("{v.gate}  We both said no: {why}") }
+    disagreed why { print("{v.gate}  We see it differently: {why}") }
+    silent why { print("{v.gate}  Still waiting: {why}") }
   }
   print("   feelings: {v.feelings}")
 }

@@ -18,6 +18,9 @@ def parse(src):
     return Parser(tokenize(src)).program()
 
 
+MATCH_ARMS = ("approved", "rejected", "disagreed", "silent", "agreed", "split")
+
+
 class Parser:
     def __init__(self, tokens):
         self.toks = tokens
@@ -198,8 +201,8 @@ class Parser:
         arms = {}
         while not self.tok.is_op("}"):
             t = self.tok
-            if t.kind != "IDENT" or t.value not in ("agreed", "split"):
-                self.error("expected an 'agreed' or 'split' arm")
+            if t.kind != "IDENT" or t.value not in MATCH_ARMS:
+                self.error("expected an arm: approved, rejected, disagreed, silent, agreed or split")
             if t.value in arms:
                 self.error(f"duplicate '{t.value}' arm")
             self.advance()
@@ -208,9 +211,7 @@ class Parser:
         self.advance()
         if not arms:
             self.error("a match needs at least one arm")
-        a_name, a_body = arms.get("agreed", (None, None))
-        s_name, s_body = arms.get("split", (None, None))
-        return ast.Match(line, subject, a_name, a_body, s_name, s_body)
+        return ast.Match(line, subject, arms)
 
     def feeling(self):
         """Parse an optional ``with feeling <expr>`` suffix."""

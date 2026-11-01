@@ -55,6 +55,25 @@ class Env:
 MAX_DEPTH = 200
 
 
+YES_WORDS = {"yes", "y", "yeah", "yep", "haan", "haa", "ha", "ji", "ok", "okay", "sure",
+             "agree", "agreed", "approve", "approved", "true"}
+NO_WORDS = {"no", "n", "nope", "nahi", "nahin", "na", "disagree", "reject", "rejected",
+            "never", "false"}
+
+
+def _yes_no(answer):
+    """1 for a yes, 0 for a no, None for silence or an open answer (like "tea")."""
+    if isinstance(answer, bool):
+        return 1 if answer else 0
+    if isinstance(answer, str):
+        word = answer.strip().lower().rstrip(".!")
+        if word in YES_WORDS:
+            return 1
+        if word in NO_WORDS:
+            return 0
+    return None
+
+
 class Interpreter:
     def __init__(self, out=None, stdin=None, clock=utc_now, base_dir=None):
         self.out = out or sys.stdout
@@ -217,17 +236,17 @@ class Interpreter:
         v = self.eval(s.subject, env)
         if not isinstance(v, Verdict):
             raise GbnRuntimeError(f"match needs a verdict, got a {type_name(v)}", s.line)
-        inner = Env(env)
-        if v.agreed and s.agreed_body is not None:
-            if s.agreed_name:
-                self.guard_name(s.agreed_name, s.line, "rebind")
-                inner.vars[s.agreed_name] = v.decision
-            self.exec_block(s.agreed_body, inner)
-        elif not v.agreed and s.split_body is not None:
-            if s.split_name:
-                self.guard_name(s.split_name, s.line, "rebind")
-                inner.vars[s.split_name] = v.reason
-            self.exec_block(s.split_body, inner)
+        # The most specific arm wins: a bond's own outcome first, then agreed or split.
+        umbrella = "agreed" if v.agreed else "split"
+        for word in ((v.outcome, umbrella) if v.outcome else (umbrella,)):
+            if word in s.arms:
+                name, body = s.arms[word]
+                inner = Env(env)
+                if name:
+                    self.guard_name(name, s.line, "rebind")
+                    inner.vars[name] = v.decision if word in ("approved", "agreed") else v.reason
+                self.exec_block(body, inner)
+                return
 
     # ---- bonds ----
 
@@ -342,22 +361,43 @@ class Interpreter:
                 feelings[who] = _feeling(extra)
             if isinstance(answer, str):
                 answer = answer.strip()
-            ballots.append(Ballot(who, answer, self.bucket(bond.key, answer, line, default_fold=True), 1.0))
+            sign = _yes_no(answer) if bond.key is None else None
+            bucket = ("yes/no", sign) if sign is not None else self.bucket(bond.key, answer, line, default_fold=True)
+            ballots.append(Ballot(who, answer, bucket, 1.0))
 
+        verdict = decide(bond.name, ballots, abstained, Settings(rule="unanimous", min_votes=2), line)
+        marks = {who: _yes_no(ans) for who, ans in ((bond.human_name, h_answer), (bond.ai_name, ai_answer))}
         if abstained:
-            silent = " and ".join(abstained)
-            verdict = decide(bond.name, ballots, abstained, Settings(rule="unanimous", min_votes=2), line)
-            verdict.reason = f"no consent: {silent} did not answer"
+            # Silence is its own state: not yes, not no, and never consent.
+            verdict.outcome = "silent"
+            verdict.reason = f"no consent: {' and '.join(abstained)} did not answer"
+            for who in abstained:
+                marks[who] = None
+            for who in marks:
+                if who not in abstained and marks[who] is None:
+                    marks[who] = 1   # an open answer was given; only the silence is unknown
+        elif verdict.agreed:
+            if all(m == 0 for m in marks.values()):
+                verdict.outcome = "rejected"
+                verdict.reason = "rejected together"
+            else:
+                verdict.outcome = "approved"
+                verdict.reason = "both approve"
+                marks = {who: 1 for who in marks}
         else:
-            verdict = decide(bond.name, ballots, abstained, Settings(rule="unanimous", min_votes=2), line)
-            verdict.reason = "both agree" if verdict.agreed else "the partners disagree"
+            verdict.outcome = "disagreed"
+            verdict.reason = "the partners disagree"
+            if None in marks.values():
+                # Open answers that differ: the human's answer leads, the AI's differs.
+                marks = {bond.human_name: 1, bond.ai_name: 0}
+        verdict.marks = marks
         verdict.feelings = feelings
         verdict.question = question
         verdict.rule = "and"
         verdict.partners = (bond.human_name, bond.ai_name)
         bond.journal.append("decision", by="both", question=question, text=f"{question} ({verdict.reason})",
-                            agreed=verdict.agreed, decision=verdict.decision, votes=verdict.votes,
-                            gate=verdict.gate(),
+                            outcome=verdict.outcome, agreed=verdict.agreed,
+                            decision=verdict.decision, votes=verdict.votes, gate=verdict.gate(),
                             feelings=feelings or None, abstained=abstained or None)
         return verdict
 

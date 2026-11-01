@@ -8,7 +8,7 @@ member saathi(question) {
   if contains(lower(question), "together") {
     return "yes" with feeling "hopeful"
   }
-  return "not yet" with feeling "careful"
+  return "no" with feeling "careful"
 }
 
 bond us {
@@ -20,20 +20,24 @@ bond us {
 
 # The human's answers are scripted so the example runs without a keyboard.
 # Remove this line to answer at the terminal yourself.
-script_human([{answer: "Yes", feeling: "excited"}, "yes"])
+script_human([{answer: "Yes", feeling: "excited"}, "nahi"])
 
 let v = us("Shall we begin this together?")
 match v {
-  agreed d { print("Together we said: {d}") }
+  approved d { print("Together we said: {d}") }
   split why { print("No decision yet: {why}") }
 }
 print("Feelings: {v.feelings}")
 
 let w = us("Should we ship before it is ready?")
+# Two noes match, but they are a mutual rejection, not an approval.
 match w {
-  agreed d { print("Together we said: {d}") }
-  split why { print("No decision yet: {why}") }
+  approved d { print("Together we said: {d}") }
+  rejected why { print("We both said no: {why}") }
+  disagreed why { print("We see it differently: {why}") }
+  silent why { print("Still waiting: {why}") }
 }
+print("Outcome: {w.outcome}, gate {w.gate}")
 
 remember us "We began, by choice of both." by human with feeling "proud"
 
