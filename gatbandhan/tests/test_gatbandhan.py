@@ -547,6 +547,114 @@ class Proposals(unittest.TestCase):
         self.assertEqual(out, "1 1\napproved approved\n")
 
 
+class Continuity(unittest.TestCase):
+    """Law 8: disagreement blocks only what is disputed; approved, independent work goes on."""
+
+    def test_a_no_can_carry_a_reason_and_a_condition(self):
+        src = PARTNER + '''
+        member wary(q) { return objection("The backup is not tested", "Test a restore first") }
+        bond us { human: "Asha" ai: wary }
+        script_human([{answer: "nahi", reason: "Too early", condition: "After the demo"}, "yes"])
+        let p = propose(us, "Migrate the database")
+        let v = us(p)
+        print(v.outcome, v.gate, v.objections.Asha.reason, v.objections.wary.condition)
+        let q = propose(us, "Migrate it tonight")
+        let w = us(q)
+        print(w.outcome, len(p.objections), len(q.objections), q.objections[0].by, q.objections[0].round)
+        print(objection("Not yet"), type_of(objection("x", "y")))
+        '''
+        self.assertEqual(output(src).splitlines(), [
+            "rejected 0 ∧ 0 = 0 Too early Test a restore first",
+            "disagreed 2 1 wary 1",
+            '<objection "Not yet"> objection',
+        ])
+
+    def test_a_reason_never_turns_a_yes_into_a_no(self):
+        src = BOND + '''
+        script_human([{answer: "yes", reason: "just a remark"}])
+        let v = us("Shall we do this together?")
+        print(v.outcome, v.objections)
+        '''
+        self.assertEqual(output(src), "approved {}\n")
+
+    def test_the_terminal_asks_why_after_a_no(self):
+        out, it = run(BOND + 'let v = us("Shall we rush?") print(v.objections)',
+                      stdin="no\nIt is not ready\nMore tests\ncalm\n")
+        self.assertIn("Why not?", out)
+        self.assertIn("What would change your mind?", out)
+        self.assertIn('{Asha: {reason: "It is not ready", condition: "More tests"}}', out)
+
+    def test_repeated_disagreement_is_flagged_but_never_becomes_consent(self):
+        src = BOND + '''
+        script_human(["no", "no", "no", "yes"])
+        let p = propose(us, "Do this together")
+        for i in range(3) { us(p) print(p.status) }
+        print(len(unresolved(us)), us(p).outcome, p.status, len(unresolved(us)))
+        '''
+        self.assertEqual(output(src).splitlines(),
+                         ["disagreed", "disagreed", "deadlocked", "1 approved approved 0"])
+
+    def test_approved_independent_work_continues_while_another_is_disputed(self):
+        src = BOND + '''
+        script_human(["yes", "no", "yes"])
+        let tests = propose(us, "Run the tests together, whenever code changes", {standing: true})
+        let migrate = propose(us, "Migrate the database together")
+        let release = propose(us, "Release together", {needs: [migrate]})
+        us(tests) us(migrate) us(release)
+        act(tests, fn() { print("tests ran") })
+        act(tests, fn() { print("tests ran again") })
+        print(migrate.status, release.status, release.blocked_by, release.ready, tests.uses)
+        act(release, fn() { print("never") })
+        '''
+        with self.assertRaises(BondError) as ctx:
+            out, it = run(src)
+        self.assertIn("it needs proposal 4, which is disagreed", str(ctx.exception))
+
+    def test_act_needs_an_approval_and_a_one_time_approval_is_used_once(self):
+        for script, extra, message in (
+            ('["no"]', "", "it is disagreed, not approved by both"),
+            ('[none]', "", "it is pending, not approved by both"),
+            ('["yes"]', 'act(p, fn() { print("once") })', "it allowed one action and it was used"),
+            ('["yes"]', "revoke(p)", "it is revoked, not approved by both"),
+        ):
+            src = BOND + f'''
+            script_human({script})
+            let p = propose(us, "Do this together")
+            us(p)
+            {extra}
+            act(p, fn() {{ print("again") }})
+            '''
+            out = io.StringIO()
+            it = Interpreter(out=out, stdin=io.StringIO(), clock=CLOCK)
+            with self.assertRaises(BondError) as ctx:
+                it.run(src)
+            self.assertIn(message, str(ctx.exception))
+            kinds = [e["kind"] for e in it.bonds["us"].journal.entries]
+            self.assertEqual(kinds[-1], "refused")
+            self.assertNotIn("again", out.getvalue())
+
+    def test_every_action_is_written_down_before_it_runs(self):
+        out, it = run(BOND + '''
+        script_human(["yes"])
+        let p = propose(us, "Do this together", {standing: true})
+        us(p)
+        act(p, fn() { print(memory(us)[len(memory(us)) - 1].kind) })
+        ''')
+        self.assertEqual(out, "act\n")
+
+    def test_revise_keeps_the_shape_and_needs_both_again(self):
+        src = BOND + '''
+        script_human(["no", "yes"])
+        let base = propose(us, "Plan together")
+        let p = propose(us, "Build together", {standing: true, needs: [base]})
+        us(p)
+        let p2 = revise(p, "Build together, slowly")
+        print(p2.standing, p2.needs, p2.status, p2.blocked_by)
+        print(us(p2).outcome, p2.ready)
+        '''
+        self.assertEqual(output(src).splitlines(), ["true [3] pending [3]", "approved false"])
+
+
 class KeptBonds(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()

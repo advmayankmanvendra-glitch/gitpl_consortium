@@ -2,7 +2,7 @@
 
 from .errors import GbnRuntimeError
 from .journal import fingerprint
-from .values import Bits, Bond, Builtin, Coalition, Proposal, show, type_name, unseal
+from .values import Bits, Bond, Builtin, Callable, Coalition, Objection, Proposal, show, type_name, unseal
 
 VERSION = "0.1.0"
 
@@ -50,8 +50,11 @@ def install(interp):
     special("memory", lambda it, args, line: _bond(it, args, line, "memory").get("memory"))
     special("propose", _propose)
     special("revise", _revise)
-    special("proposals", lambda it, args, line: [Proposal(b, e) for b in [_bond(it, args, line, "proposals")]
-                                                 for e in b.journal.entries if e["kind"] == "proposal"])
+    special("proposals", lambda it, args, line: _proposals(it, args, line))
+    special("unresolved", lambda it, args, line: _proposals(it, args, line, open_only=True))
+    special("act", _act)
+    special("revoke", _revoke)
+    special("objection", _objection)
     plain("bits", _bits)
     plain("version", lambda: VERSION)
 
@@ -173,30 +176,107 @@ def _history(it, args, line):
     return list(c.history)
 
 
-def _add_proposal(bond, text, version, replaces):
+def _add_proposal(bond, text, version, replaces, standing=False, needs=()):
     n = len(bond.journal.entries) + 1
-    fp = fingerprint({"bond": bond.get("id"), "n": n, "text": text, "version": version, "replaces": replaces})
-    entry = bond.journal.append("proposal", text=text, version=version, replaces=replaces, fingerprint=fp)
+    material = {"bond": bond.get("id"), "n": n, "text": text, "version": version, "replaces": replaces}
+    if standing:
+        material["standing"] = True
+    if needs:
+        material["needs"] = [p.fingerprint for p in needs]
+    entry = bond.journal.append("proposal", text=text, version=version, replaces=replaces,
+                                standing=True if standing else None,
+                                needs=[p.id for p in needs] or None, fingerprint=fingerprint(material))
     return Proposal(bond, entry)
 
 
+def _options(bond, opts, fn, line):
+    """Read {standing: bool, needs: [proposals]} for propose and revise."""
+    if opts is None:
+        return False, []
+    if not isinstance(opts, dict) or set(opts) - {"standing", "needs"}:
+        raise GbnRuntimeError(f"{fn}: options are a map with 'standing' and 'needs'", line)
+    standing = opts.get("standing", False)
+    needs = opts.get("needs") or []
+    if not isinstance(standing, bool):
+        raise GbnRuntimeError(f"{fn}: 'standing' must be true or false", line)
+    if not isinstance(needs, list) or not all(isinstance(p, Proposal) and p.bond is bond for p in needs):
+        raise GbnRuntimeError(f"{fn}: 'needs' must be a list of proposals of the same bond", line)
+    return standing, list(needs)
+
+
 def _propose(it, args, line):
-    if len(args) != 2 or not isinstance(args[0], Bond) or not isinstance(args[1], str):
-        raise GbnRuntimeError("propose(bond, text) needs a bond and a text", line)
-    return _add_proposal(args[0], args[1], 1, None)
+    if len(args) not in (2, 3) or not isinstance(args[0], Bond) or not isinstance(args[1], str):
+        raise GbnRuntimeError("propose(bond, text, options?) needs a bond and a text", line)
+    standing, needs = _options(args[0], args[2] if len(args) == 3 else None, "propose", line)
+    return _add_proposal(args[0], args[1], 1, None, standing, needs)
 
 
 def _revise(it, args, line):
-    if len(args) != 2 or not isinstance(args[0], Proposal) or not isinstance(args[1], str):
-        raise GbnRuntimeError("revise(proposal, text) needs a proposal and a text", line)
+    if len(args) not in (2, 3) or not isinstance(args[0], Proposal) or not isinstance(args[1], str):
+        raise GbnRuntimeError("revise(proposal, text, options?) needs a proposal and a text", line)
     p = args[0]
     status = p.status()
     if status == "replaced":
         raise GbnRuntimeError(f"proposal {p.id} was already revised; revise its newest version", line)
-    if status in ("approved", "rejected"):
+    if status not in ("pending", "disagreed", "deadlocked"):
         raise GbnRuntimeError(f"proposal {p.id} is already {status}; a decided proposal is not revised, "
                               "make a new one with propose()", line)
-    return _add_proposal(p.bond, args[1], p.version + 1, p.id)
+    if len(args) == 3:
+        standing, needs = _options(p.bond, args[2], "revise", line)
+    else:
+        standing, needs = p.standing, [Proposal(p.bond, p.entry_of(n)) for n in p.needs]
+    return _add_proposal(p.bond, args[1], p.version + 1, p.id, standing, needs)
+
+
+def _act(it, args, line):
+    """Run work under an approved proposal. Anything else is refused and remembered."""
+    if len(args) != 2 or not isinstance(args[0], Proposal) or not isinstance(args[1], Callable):
+        raise GbnRuntimeError("act(proposal, fn() { ... }) needs a proposal and a function", line)
+    p, work = args
+    bond = p.bond
+    why = "Only work both partners approved can run under the bond"
+    status = p.status()
+    if status != "approved":
+        it.refuse(bond, f"act on proposal {p.id}: it is {status}, not approved by both", line, why)
+    blocked = p.blocked_by()
+    if blocked:
+        need = Proposal(bond, p.entry_of(blocked[0]))
+        it.refuse(bond, f"act on proposal {p.id}: it needs proposal {need.id}, which is {need.status()}", line, why)
+    uses = len(p._entries("act"))
+    if not p.standing and uses:
+        it.refuse(bond, f"act on proposal {p.id} again: it allowed one action and it was used", line,
+                  "A one-time approval is never reused; propose again, or approve a standing permission")
+    # The use is written down before the work runs, so a crash cannot hide it.
+    bond.journal.append("act", by="program", proposal=p.fingerprint, proposal_id=p.id, use=uses + 1,
+                        text=f"acted on proposal {p.id}: {p.text}")
+    return it.call(work, [], line)
+
+
+def _revoke(it, args, line):
+    """Withdraw an approval. Consent needs both partners, so either one may withdraw it."""
+    if len(args) != 1 or not isinstance(args[0], Proposal):
+        raise GbnRuntimeError("revoke(proposal) needs a proposal", line)
+    p = args[0]
+    status = p.status()
+    if status != "approved":
+        raise GbnRuntimeError(f"proposal {p.id} is {status}; only an approved proposal can be revoked", line)
+    p.bond.journal.append("revoke", by="program", proposal=p.fingerprint, proposal_id=p.id,
+                          text=f"revoked proposal {p.id}: {p.text}")
+    return None
+
+
+def _proposals(it, args, line, open_only=False):
+    b = _bond(it, args, line, "unresolved" if open_only else "proposals")
+    out = [Proposal(b, e) for e in b.journal.entries if e["kind"] == "proposal"]
+    if open_only:
+        out = [p for p in out if p.status() in ("pending", "disagreed", "deadlocked")]
+    return out
+
+
+def _objection(it, args, line):
+    if not 1 <= len(args) <= 2 or not isinstance(args[0], str) or not args[0].strip():
+        raise GbnRuntimeError("objection(reason, condition?) needs a reason", line)
+    return Objection(args[0].strip(), args[1] if len(args) == 2 else None)
 
 
 def _bond(it, args, line, fn):

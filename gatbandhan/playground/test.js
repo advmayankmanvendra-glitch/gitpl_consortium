@@ -100,6 +100,15 @@ function check(name, ok, detail) {
     let a = us("one?") print(a.gate, a.feelings) print(us("two?").reason)`);
   check("human answers through ask", lines.join("|") === '1 ∧ 1 = 1 {M: "glad"}|no consent: M did not answer', lines.join("|"));
 
+  // after a no, the human is asked why and what would change their mind
+  const said = ["no", "It is not ready", "More tests", "calm"];
+  const asked = [];
+  const out3 = [];
+  const it3 = new G.Interpreter({ print: l => out3.push(l), ask: async q => { asked.push(q); return said.shift(); } });
+  await it3.run(`member s(q) { return "yes" } bond us { human: "M" ai: s } print(us("rush?").objections)`);
+  check("human objection through ask", out3[0] === '{M: {reason: "It is not ready", condition: "More tests"}}' &&
+    asked.some(q => q.startsWith("Why not?")) && asked.some(q => q.startsWith("What would change")), out3.join("|"));
+
   console.log(`${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

@@ -63,12 +63,13 @@ class Verdict:
     rule: str = ""
     partners: tuple = ()   # for a bond: (human name, ai name)
     proposal: object = None  # the Proposal decided on, if one was asked
+    objections: dict = field(default_factory=dict)  # partner -> {reason, condition}
     outcome: str = ""      # for a bond: approved, rejected, disagreed or silent
     marks: dict = field(default_factory=dict)  # for a bond: partner -> 1, 0 or None (silent)
 
     FIELDS = ("agreed", "decision", "reason", "votes", "abstained", "dissent",
               "tally", "margin", "tiebreak", "coalition", "feelings", "question",
-              "bits", "signal", "gate", "rule", "outcome", "approved", "proposal")
+              "bits", "signal", "gate", "rule", "outcome", "approved", "proposal", "objections")
 
     @property
     def approved(self):
@@ -230,14 +231,52 @@ class Bond:
         return None
 
 
+YES_WORDS = {"yes", "y", "yeah", "yep", "haan", "haa", "ha", "ji", "ok", "okay", "sure",
+             "agree", "agreed", "approve", "approved", "true"}
+NO_WORDS = {"no", "n", "nope", "nahi", "nahin", "na", "disagree", "reject", "rejected",
+            "never", "false"}
+
+
+def yes_no(answer):
+    """1 for a yes, 0 for a no, None for silence or an open answer (like "tea")."""
+    if isinstance(answer, Objection):
+        return 0
+    if isinstance(answer, bool):
+        return 1 if answer else 0
+    if isinstance(answer, str):
+        word = answer.strip().lower().rstrip(".!")
+        if word in YES_WORDS:
+            return 1
+        if word in NO_WORDS:
+            return 0
+    return None
+
+
+@dataclass(frozen=True)
+class Objection:
+    """A "no" that says why, and optionally what would change it."""
+    reason: str
+    condition: object = None
+
+    FIELDS = ("reason", "condition")
+
+    def get(self, name):
+        return getattr(self, name)
+
+
+DEADLOCK_ROUNDS = 3   # disagreed rounds after which an open proposal is flagged for review
+
+
 class Proposal:
     """A proposal the bond decides on. Its fingerprint never changes; a revision is a new proposal.
 
     Its status is read from the bond's memory each time, so it survives between runs:
-    pending (not decided yet, or only met with silence), disagreed, approved, rejected,
-    or replaced (a newer version exists).
+    pending (not decided yet, or only met with silence), disagreed, deadlocked (still
+    open after DEADLOCK_ROUNDS disagreements), approved, rejected, replaced (a newer
+    version exists) or revoked (an approval that was withdrawn).
     """
-    FIELDS = ("id", "version", "text", "fingerprint", "replaces", "status", "rounds", "bond")
+    FIELDS = ("id", "version", "text", "fingerprint", "replaces", "status", "rounds", "bond",
+              "standing", "needs", "objections", "uses", "blocked_by", "ready")
 
     def __init__(self, bond, entry):
         self.bond = bond
@@ -246,22 +285,55 @@ class Proposal:
         self.text = entry["text"]
         self.fingerprint = entry["fingerprint"]
         self.replaces = entry.get("replaces")
+        self.standing = bool(entry.get("standing", False))
+        self.needs = list(entry.get("needs", []))
 
     def __deepcopy__(self, memo):
         return self   # a proposal cannot change, so copies may share it
 
-    def rounds(self):
+    def _entries(self, kind):
         return [e for e in self.bond.journal.entries
-                if e["kind"] == "decision" and e.get("proposal") == self.fingerprint]
+                if e["kind"] == kind and e.get("proposal") == self.fingerprint]
+
+    def rounds(self):
+        return self._entries("decision")
+
+    def entry_of(self, n):
+        return next(e for e in self.bond.journal.entries if e["n"] == n)
 
     def status(self):
+        if self._entries("revoke"):
+            return "revoked"
         outcomes = [e.get("outcome") for e in self.rounds()]
         for final in ("approved", "rejected"):
             if final in outcomes:
                 return final
         if any(e["kind"] == "proposal" and e.get("replaces") == self.id for e in self.bond.journal.entries):
             return "replaced"
-        return "disagreed" if outcomes and outcomes[-1] == "disagreed" else "pending"
+        if outcomes and outcomes[-1] == "disagreed":
+            return "deadlocked" if outcomes.count("disagreed") >= DEADLOCK_ROUNDS else "disagreed"
+        return "pending"
+
+    def objections(self):
+        out = []
+        for r, e in enumerate(self.rounds(), 1):
+            for who, o in (e.get("objections") or {}).items():
+                out.append({"round": r, "by": who, "reason": o.get("reason"), "condition": o.get("condition")})
+        return out
+
+    def blocked_by(self):
+        """The proposals this one needs that are not approved yet."""
+        blocked = []
+        for n in self.needs:
+            need = Proposal(self.bond, self.entry_of(n))
+            if need.status() != "approved":
+                blocked.append(n)
+        return blocked
+
+    def ready(self):
+        """Whether `act` may run under this proposal right now."""
+        return (self.status() == "approved" and not self.blocked_by()
+                and (self.standing or not self._entries("act")))
 
     def get(self, name):
         if name == "status":
@@ -270,6 +342,14 @@ class Proposal:
             return len(self.rounds())
         if name == "bond":
             return self.bond.name
+        if name == "objections":
+            return self.objections()
+        if name == "uses":
+            return len(self._entries("act"))
+        if name == "blocked_by":
+            return self.blocked_by()
+        if name == "ready":
+            return self.ready()
         return getattr(self, name)
 
 
@@ -296,6 +376,8 @@ def type_name(v):
         return "verdict"
     if isinstance(v, Proposal):
         return "proposal"
+    if isinstance(v, Objection):
+        return "objection"
     if isinstance(v, Bits):
         return "bits"
     if isinstance(v, Callable):
@@ -326,7 +408,11 @@ def show(v, quote=False):
     if isinstance(v, dict):
         return "{" + ", ".join(f"{_key(k)}: {show(x, True)}" for k, x in v.items()) + "}"
     if isinstance(v, Proposal):
-        return f"<proposal {v.id} v{v.version} {v.status()}: {show(v.text, True)}>"
+        kind = " standing" if v.standing else ""
+        return f"<proposal {v.id} v{v.version}{kind} {v.status()}: {show(v.text, True)}>"
+    if isinstance(v, Objection):
+        until = f" until {show(v.condition, True)}" if v.condition is not None else ""
+        return f"<objection {show(v.reason, True)}{until}>"
     if isinstance(v, Verdict):
         if v.outcome in ("approved", "rejected"):
             return f"<verdict {v.coalition}: {v.outcome} {show(v.decision, True)} ({v.reason})>"
@@ -366,4 +452,6 @@ def freeze(v):
         return ("map", tuple(sorted((str(k), freeze(x)) for k, x in v.items())))
     if isinstance(v, Proposal):
         return ("proposal", v.fingerprint)
+    if isinstance(v, Objection):
+        return ("objection", v.reason, freeze(v.condition))
     return ("id", id(v))

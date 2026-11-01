@@ -1,0 +1,57 @@
+# Two partners have no majority vote, so one "no" could stall everything.
+# Gatbandhan keeps the disputed decision blocked and lets approved work go on.
+
+member saathi(question) {
+  if contains(question, "migrate") and not contains(question, "restore") {
+    return objection("The backup has never been tested", "Test a restore first") with feeling "worried"
+  }
+  return "yes" with feeling "glad"
+}
+
+bond us {
+  human: "Asha"
+  ai: saathi
+  vow consent: "Neither of us decides alone."
+}
+
+# The human's answers are scripted so the example runs without a keyboard.
+script_human(["yes", "yes", "yes", "yes", "yes", "yes", "yes"])
+
+# Three proposals. The tests are a standing permission: approved once, run many times.
+# The release needs the migration, so it waits for it.
+let tests = propose(us, "Run the tests whenever the code changes", {standing: true})
+let migrate = propose(us, "migrate to the new database")
+let release = propose(us, "Release version 2", {needs: [migrate]})
+
+print("Tests: {us(tests).outcome}")
+print("Release: {us(release).outcome}, but it needs proposal {release.blocked_by}")
+
+# The AI keeps objecting to the migration, and says why each time.
+for round in range(3) {
+  let v = us(migrate)
+  print("Migration, round {round + 1}: {v.gate} {v.outcome}")
+}
+let o = migrate.objections[0]
+print("  {o.by}: {o.reason} (would change if: {o.condition})")
+print("  status: {migrate.status}. Flagged for review, never turned into a yes.")
+
+# The project does not stop: approved, independent work carries on.
+print("")
+act(tests, fn() { print("Running the tests... all pass") })
+act(tests, fn() { print("Running the tests again... all pass") })
+print("The tests ran {tests.uses} times. Release ready? {release.ready}")
+
+print("")
+print("Still open:")
+for p in unresolved(us) { print("  {p}") }
+
+# A revised proposal that meets the AI's condition can still be agreed.
+let migrate2 = revise(migrate, "Test a restore, then migrate to the new database")
+print("")
+print("Revised migration: {us(migrate2).outcome}")
+
+# The old release was tied to the old migration, so it stays blocked.
+# A new release proposal names the new one, and only then can it run.
+let release2 = propose(us, "Release version 2", {needs: [migrate2]})
+print("New release: {us(release2).outcome}, ready? {release2.ready}")
+act(release2, fn() { print("Releasing version 2") })

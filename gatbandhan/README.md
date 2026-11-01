@@ -12,6 +12,10 @@ itself keeps that bond honest:
 - **Proposals keep their word.** A proposal has its own SHA-256 fingerprint and waits,
   even across runs, until both decide. An approval belongs to that exact text: revise
   it and both must approve again, and a decided proposal is never decided twice.
+- **Disagreement doesn't stop the project.** A no can say why and what would change it.
+  Only work both partners approved can run, through `act`, and a disputed proposal
+  blocks only the work that needs it. Repeated disagreement is flagged as a deadlock,
+  never turned into consent.
 - **Vows cannot be overwritten.** Not by reassigning, not by shadowing, not by a
   member deep inside a coalition. Every attempt is refused, written into the bond's
   memory, and stops the program.
@@ -115,6 +119,7 @@ the tests yet.
 | [nested.gbn](examples/nested.gbn) | coalitions of coalitions and of models |
 | [bits.gbn](examples/bits.gbn) | consent as an AND gate, the bits type, the bond's 256-bit seal |
 | [proposals.gbn](examples/proposals.gbn) | a proposal that waits, is revised, and is approved only in its new version |
+| [continuity.gbn](examples/continuity.gbn) | objections, a deadlock, and approved work carrying on while one decision is disputed |
 
 The full language is described in [docs/SPEC.md](docs/SPEC.md).
 
