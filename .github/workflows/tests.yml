@@ -32,6 +32,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: JavaScript interpreter tests
+        run: node playground/test.js
       - name: Run examples
         env:
           PYTHONPATH: src

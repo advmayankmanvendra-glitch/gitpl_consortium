@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from gatbandhan import BondError, GbnRuntimeError, GbnSyntaxError, Interpreter  # noqa: E402
+from gatbandhan import BondError, GatbandhanError, GbnRuntimeError, GbnSyntaxError, Interpreter  # noqa: E402
 
 CLOCK = lambda: "2026-10-31T00:00:00+00:00"  # noqa: E731
 
@@ -444,13 +444,44 @@ class KeptBonds(unittest.TestCase):
             run(self.kept(), base_dir=self.dir)
 
 
+class Parity(unittest.TestCase):
+    """tests/parity.json is shared with the JavaScript tests (playground/test.js):
+    both interpreters must print exactly the output stored there."""
+
+    def test_python_matches_the_shared_cases(self):
+        path = os.path.join(os.path.dirname(__file__), "parity.json")
+        with open(path, encoding="utf-8") as f:
+            cases = json.load(f)
+        self.assertGreater(len(cases), 50)
+        for case in cases:
+            with self.subTest(source=case["source"][:60]):
+                out = io.StringIO()
+                it = Interpreter(out=out, stdin=io.StringIO(), clock=lambda: "T")
+                try:
+                    it.run(case["source"])
+                except GatbandhanError as e:
+                    out.write(f"{type(e).__name__}: {e}\n")
+                self.assertEqual(out.getvalue(), case["output"])
+
+    def test_playground_page_is_up_to_date(self):
+        here = os.path.join(os.path.dirname(__file__), "..", "playground")
+        sys.path.insert(0, here)
+        try:
+            import build
+        finally:
+            sys.path.remove(here)
+        with open(os.path.join(here, "index.html"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), build.build(), "run: python playground/build.py")
+
+
 class Examples(unittest.TestCase):
     def test_examples_run(self):
-        root = os.path.join(os.path.dirname(__file__), "..", "examples")
-        for name in sorted(os.listdir(root)):
-            if not name.endswith(".gbn"):
-                continue
-            with self.subTest(example=name), open(os.path.join(root, name)) as f:
+        here = os.path.dirname(__file__)
+        roots = [os.path.join(here, "..", "examples"), os.path.join(here, "..", "playground", "examples")]
+        files = [os.path.join(r, n) for r in roots for n in sorted(os.listdir(r)) if n.endswith(".gbn")]
+        for path in files:
+            name = os.path.basename(path)
+            with self.subTest(example=name), open(path, encoding="utf-8") as f:
                 src = f.read()
                 it = Interpreter(out=io.StringIO(), stdin=io.StringIO(), base_dir=tempfile.mkdtemp())
                 if name.startswith("refused_"):

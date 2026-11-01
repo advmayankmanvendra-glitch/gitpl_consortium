@@ -1,0 +1,238 @@
+[
+ {
+  "source": "print(1 + 2 * 3, 7 / 2, 6 / 3, 7 % 3, -7 % 3, -2, 0.1 + 0.2, 10 / 4)",
+  "output": "7 3.5 2 1 2 -2 0.3 2.5\n"
+ },
+ {
+  "source": "let n = \"Gat\" print(\"{n}bandhan\", len(n))",
+  "output": "Gatbandhan 3\n"
+ },
+ {
+  "source": "print(\"a \\{literal\\} brace\")",
+  "output": "a {literal} brace\n"
+ },
+ {
+  "source": "let total = 0 for i in range(10) { if i == 3 { continue } if i == 6 { break } total = total + i } let k = 0 while k < 3 { k = k + 1 } print(total, k)",
+  "output": "12 3\n"
+ },
+ {
+  "source": "fn fact(n) { if n <= 1 { return 1 } return n * fact(n - 1) } fn adder(x) { return fn(y) { return x + y } } let add2 = adder(2) print(fact(5), add2(40))",
+  "output": "120 42\n"
+ },
+ {
+  "source": "let xs = [3, 1, 2] push(xs, 0) xs[0] = 9 let m = {a: 1, \"b c\": 2} m.d = 4 print(sort(xs), m, m.a, m[\"b c\"], m.missing, 2 in xs, \"a\" in m)",
+  "output": "[0, 1, 2, 9] {a: 1, \"b c\": 2, d: 4} 1 2 none true true\n"
+ },
+ {
+  "source": "print(1 == true, 1 == 1.0, [1, 2] == [1, 2], {a: 1} == {a: 1})",
+  "output": "false true true true\n"
+ },
+ {
+  "source": "let x = 1",
+  "output": ""
+ },
+ {
+  "source": "let = 2",
+  "output": "GbnSyntaxError: line 1: expected a name (found '=')\n"
+ },
+ {
+  "source": "print(nope)",
+  "output": "GbnRuntimeError: line 1: 'nope' is not defined\n"
+ },
+ {
+  "source": "x = 1",
+  "output": "GbnRuntimeError: line 1: 'x' is not defined (use 'let' to create it)\n"
+ },
+ {
+  "source": "print(1 / 0)",
+  "output": "GbnRuntimeError: line 1: division by zero\n"
+ },
+ {
+  "source": "print(1 + \"a\")",
+  "output": "GbnRuntimeError: line 1: cannot add a num and a str\n"
+ },
+ {
+  "source": "let xs = [1] print(xs[5])",
+  "output": "GbnRuntimeError: line 1: index 5 is out of range\n"
+ },
+ {
+  "source": "print(split(\"a b  c\"), split(\"a,b\", \",\"), join([1, 2], \"-\"), replace(\"aXbX\", \"X\", \".\"), upper(\"hi\"), trim(\"  x \"))",
+  "output": "[\"a\", \"b\", \"c\"] [\"a\", \"b\"] 1-2 a.b. HI x\n"
+ },
+ {
+  "source": "print(num(\"42\"), num(\"2.5\"), str(3), type_of([]), type_of({}), type_of(none), round(2.567, 2), abs(-3), min(3, 1), max([4, 9]), sum([1, 2.5]))",
+  "output": "42 2.5 3 list map none 2.57 3 1 9 3.5\n"
+ },
+ {
+  "source": "print(keys({a: 1, b: 2}), values({a: 1, b: 2}), contains(\"abc\", \"b\"), starts_with(\"abc\", \"a\"), ends_with(\"abc\", \"c\"))",
+  "output": "[\"a\", \"b\"] [1, 2] true true true\n"
+ },
+ {
+  "source": "member keywords(msg) trust 2 { if contains(lower(msg), \"winner\") { return \"spam\" } return \"ham\" } member shouting(msg) { if upper(msg) == msg { return \"spam\" } return \"ham\" } member links(msg) { if not contains(msg, \"http\") { abstain \"no links\" } return \"spam\" } member broken(msg) { return 1 / 0 } coalition c(m) { members: keywords, shouting, links, broken } let v = c(\"You are a WINNER http://x\") print(v, v.votes, v.abstained, v.dissent, v.tally, v.margin, v.gate, v.bits, v.signal, v.rule)",
+  "output": "<verdict c: agreed \"spam\" (majority, margin 0.75)> {keywords: \"spam\", shouting: \"ham\", links: \"spam\"} {broken: \"error: division by zero\"} [\"shouting\"] [{answer: \"spam\", weight: 3, members: [\"keywords\", \"links\"]}, {answer: \"ham\", weight: 1, members: [\"shouting\"]}] 0.75 MAJORITY(1, 0, 1) = 1 {keywords: 1, shouting: 0, links: 1} 0b101 majority\n"
+ },
+ {
+  "source": "member s(m) { if upper(m) == m { return \"spam\" } return \"ham\" } member l(m) { if not contains(m, \"http\") { abstain \"no\" } return \"spam\" } coalition c(m) { members: s, l  tie: \"ham\" } let v = c(\"hi http\") print(v, v.tiebreak, v.dissent, v.margin) coalition d(m) { members: s, l } print(d(\"hi http\"))",
+  "output": "<verdict c: agreed \"ham\" (tie broken by default, margin 0.5)> true [\"l\"] 0.5\n<verdict d: split (tie)>\n"
+ },
+ {
+  "source": "member a(x) { return 1 } member b(x) { return 1 } member z(x) { return 2 } coalition u(x) { members: a, b, z rule: unanimous } coalition q(x) { members: a, b, z rule: quorum 2 } coalition q3(x) { members: a, b, z rule: quorum 3 } coalition t(x) { members: a, b, z rule: threshold 0.6 } coalition t2(x) { members: a, b, z rule: threshold 0.7 } coalition p(x) { members: a, z rule: plurality } coalition v(x) { members: a, b, z veto: z } coalition mv(x) { members: a min_votes: 2 } print(u(0)) print(q(0)) print(q3(0)) print(t(0)) print(t2(0)) print(p(0)) print(v(0)) print(mv(0))",
+  "output": "<verdict u: split (not unanimous)>\n<verdict q: agreed 1 (quorum of 2, margin 0.67)>\n<verdict q3: split (no answer reached a quorum of 3)>\n<verdict t: agreed 1 (threshold 0.6, margin 0.67)>\n<verdict t2: split (no answer reached 0.7 of the weight)>\n<verdict p: split (tie)>\n<verdict v: split (vetoed by z)>\n<verdict mv: split (too few votes (1 of 2 needed))>\n"
+ },
+ {
+  "source": "coalition c(x) { members: fn(x) { return \"Yes\" }, fn(x) { return \"yes \" }, fn(x) { return \"no\" } key: fn(a) { return trim(lower(a)) } } print(c(1), c(1).votes)",
+  "output": "<verdict c: agreed \"Yes\" (majority, margin 0.67)> {member1: \"Yes\", member2: \"yes \", member3: \"no\"}\n"
+ },
+ {
+  "source": "member greedy(xs) { push(xs, \"mine\") return len(xs) } member counter(xs) { return len(xs) } coalition c(xs) { members: greedy, counter  rule: unanimous } let data = [1] let v = c(data) print(v.agreed, data)",
+  "output": "false [1]\n"
+ },
+ {
+  "source": "member yes(x) { return true } member no(x) { return false } member real(x) { return x > 0 } coalition c(x) { members: yes, no, real  rule: plurality  learn: 0.5 } c(1) c(-1) c(3) print(trust(c), len(history(c)), history(c))",
+  "output": "{yes: 1.125, no: 0.375, real: 3.375} 3 [<verdict c: agreed true (plurality, margin 0.67)>, <verdict c: agreed false (plurality, margin 0.57)>, <verdict c: agreed true (plurality, margin 0.8)>]\n"
+ },
+ {
+  "source": "script(\"m1\", [\"a\", \"b\"]) script(\"m2\", [\"a\", \"a\"]) member one(x) { return consult(\"m1\", x) } member two(x) { return consult(\"m2\", x) } coalition inner(x) { members: one, two  rule: unanimous } member fixed(x) { return \"a\" } coalition outer(x) { members: inner, fixed  rule: unanimous } print(outer(\"q\")) print(outer(\"q\"))",
+  "output": "<verdict outer: agreed \"a\" (unanimous, margin 1)>\n<verdict outer: agreed \"a\" (unanimous, margin 1)>\n"
+ },
+ {
+  "source": "member warm(x) { return \"yes\" with feeling \"glad\" } member cool(x) { return \"yes\" } coalition c(x) { members: warm, cool } print(c(1).feelings)",
+  "output": "{warm: \"glad\"}\n"
+ },
+ {
+  "source": "member saathi(q) { if contains(lower(q), \"public\") { return \"yes\" with feeling \"hopeful\" } return \"no\" with feeling \"careful\" } bond us { human: \"Mayank\" ai: saathi vow honesty: \"truth\" } script_human([{answer: \"Yes \", feeling: \"excited\"}, \"yes\"]) let a = us(\"Stay public?\") let b = us(\"Ship?\") let c = us(\"There?\") print(a, a.feelings, a.gate) print(b, b.votes, b.gate) print(c, c.abstained, c.gate, c.signal)",
+  "output": "<verdict us: agreed \"Yes\" (both agree, margin 1)> {Mayank: \"excited\", saathi: \"hopeful\"} 1 ∧ 1 = 1\n<verdict us: split (the partners disagree)> {Mayank: \"yes\", saathi: \"no\"} 1 ∧ 0 = 0\n<verdict us: split (no consent: Mayank did not answer)> {Mayank: \"did not answer\"} 0 ∧ 1 = 0 0b01\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi vow honesty: \"truth\" } remember us \"We met.\" by human with feeling \"shy\" amend us 3 \"We met on a Saturday.\" vow us.kindness = \"Be patient.\" vow us.honesty = \"truth\" for e in memory(us) { print(e.n, e.kind, e.by, e.text, e.feeling, e.amends) } print(us.vows, us, us.human, us.ai, us.name, len(us.seal))",
+  "output": "1 bond both M and saathi formed the bond 'us' none none\n2 vow both truth none none\n3 memory M We met. shy none\n4 amend both We met on a Saturday. none 3\n5 vow both Be patient. none none\n{honesty: \"truth\", kindness: \"Be patient.\"} <bond us: M and saathi> M saathi us 64\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi vow honesty: \"truth\" } us.vows.honesty = \"lies\"",
+  "output": "BondError: line 1: refused: change a sealed map at \"honesty\" that belongs to bond 'us'. The bond 'us' cannot be overwritten\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi vow honesty: \"truth\" } vow us.honesty = \"lies\"",
+  "output": "BondError: line 1: refused: overwrite the vow 'honesty' (made in entry 2). The bond 'us' cannot be overwritten\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi } us = 1",
+  "output": "BondError: line 1: refused: overwrite 'us'. The bond 'us' cannot be overwritten\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi } fn f() { let us = 2 } f()",
+  "output": "BondError: line 1: refused: rebind 'us'. The bond 'us' cannot be overwritten\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi } push(memory(us), 1)",
+  "output": "BondError: line 1: refused: change a sealed list that belongs to bond 'us'. The bond 'us' cannot be overwritten\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi } let m = memory(us) m[0] = 1",
+  "output": "BondError: line 1: refused: change a sealed list at 0 that belongs to bond 'us'. The bond 'us' cannot be overwritten\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi } us.human = \"x\"",
+  "output": "BondError: line 1: refused: overwrite human of bond 'us'. The bond 'us' cannot be overwritten\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi } bond us { human: \"x\" ai: \"y\" }",
+  "output": "BondError: line 1: refused: declare the bond 'us' a second time. The bond 'us' cannot be overwritten\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi vow h: [1] } member m2(q) { push(us.vows.h, 2) } coalition c(q) { members: m2 } c(1)",
+  "output": "BondError: line 1: refused: change a sealed list that belongs to bond 'us'. The bond 'us' cannot be overwritten\n"
+ },
+ {
+  "source": "member saathi(q) { return \"yes\" } bond us { human: \"M\" ai: saathi } let c = copy(memory(us)) push(c, 1) print(len(c), len(memory(us)))",
+  "output": "2 1\n"
+ },
+ {
+  "source": "script(\"claude-test\", [{answer: \"yes\", feeling: \"warm\"}, \"\\{\\\"answer\\\": \\\"no\\\"\\}\"]) bond us { human: \"M\"  ai: \"claude-test\" } script_human([\"yes\", \"yes\"]) print(us(\"one?\"), us(\"two?\"))",
+  "output": "<verdict us: agreed \"yes\" (both agree, margin 1)> <verdict us: split (the partners disagree)>\n"
+ },
+ {
+  "source": "print(0b0101, type_of(0b0101), len(0b0101), num(0b0101), 0b1_0, 0b01 == 0b1, 0b1 == bits(1))",
+  "output": "0b0101 bits 4 5 0b10 false true\n"
+ },
+ {
+  "source": "let a = 0b0101 let b = 0b0011 print(a & b, a | b, a ^ b, ~a, a << 1, a >> 2, a + b, 0b1 & 0b0110)",
+  "output": "0b0001 0b0111 0b0110 0b1010 0b1010 0b0001 0b01010011 0b0000\n"
+ },
+ {
+  "source": "let a = 0b101 let s = 0 for x in a { s = s + x } print(a[0], a[1], a[-1], s, not 0b000, not 0b010)",
+  "output": "1 0 1 2 true false\n"
+ },
+ {
+  "source": "print(bits(11), bits(11, 8), bits(0), bits([1, 0, 1]), bits(\"0110\"), bits(0b11, 4))",
+  "output": "0b1011 0b00001011 0b0 0b101 0b0110 0b0011\n"
+ },
+ {
+  "source": "print(6 & 3, 6 | 3, 6 ^ 3, ~0, 1 << 4, 16 >> 2, 1 | 2 == 3, 1 + 2 & 3)",
+  "output": "2 7 5 -1 16 4 true 3\n"
+ },
+ {
+  "source": "print(0b12)",
+  "output": "GbnSyntaxError: line 1: a binary number is 0b followed by 0s and 1s\n"
+ },
+ {
+  "source": "print(0b1 & 1)",
+  "output": "GbnRuntimeError: line 1: cannot combine bits and a num with '&'; turn the number into bits with bits(n, width)\n"
+ },
+ {
+  "source": "print(1 | 0b1)",
+  "output": "GbnRuntimeError: line 1: cannot combine a number and bits with '|'; turn the number into bits with bits(n, width)\n"
+ },
+ {
+  "source": "print(bits(5, 2))",
+  "output": "GbnRuntimeError: line 1: 5 does not fit in 2 bits\n"
+ },
+ {
+  "source": "print(bits([2]))",
+  "output": "GbnRuntimeError: line 1: bits from a list needs a non-empty list of 0s and 1s\n"
+ },
+ {
+  "source": "let a = 0b1 a[0] = 0",
+  "output": "GbnRuntimeError: line 1: cannot set a field or index on a bits\n"
+ },
+ {
+  "source": "print(trust(1))",
+  "output": "GbnRuntimeError: line 1: trust(c) needs a coalition\n"
+ },
+ {
+  "source": "match 5 { agreed { } }",
+  "output": "GbnRuntimeError: line 1: match needs a verdict, got a num\n"
+ },
+ {
+  "source": "coalition c(x) { members: 1 } c(1)",
+  "output": "GbnRuntimeError: line 1: coalition 'c': member 1 is a num, not something that can vote\n"
+ },
+ {
+  "source": "coalition c(x) { rule: majority }",
+  "output": "GbnSyntaxError: line 1: coalition 'c' has no members\n"
+ },
+ {
+  "source": "bond b { human: \"x\" }",
+  "output": "GbnSyntaxError: line 1: bond 'b' needs a 'ai' partner\n"
+ },
+ {
+  "source": "fn f(a) { return a } f(1, 2)",
+  "output": "GbnRuntimeError: line 1: 'f' takes 1 arguments, got 2\n"
+ },
+ {
+  "source": "return 1",
+  "output": "GbnRuntimeError: 'return' outside a function\n"
+ },
+ {
+  "source": "abstain",
+  "output": "GbnRuntimeError: 'abstain' outside a member\n"
+ },
+ {
+  "source": "member m(x) { abstain } print(m(1))",
+  "output": "none\n"
+ },
+ {
+  "source": "print(\"{1 + 2} and {[1, {a: \"x\"}]}\")",
+  "output": "GbnSyntaxError: line 1: unclosed '{' in string (write \\{ for a literal brace)\n"
+ }
+]
