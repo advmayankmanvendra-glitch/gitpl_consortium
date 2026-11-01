@@ -9,7 +9,7 @@ member saathi(question) {
 }
 
 bond us {
-  human: "Mayank"
+  human: "Asha"
   ai: saathi
   vow consent: "Neither of us decides alone."
 }

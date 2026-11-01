@@ -5,14 +5,14 @@
 # ANTHROPIC_API_KEY to bond with a real model.
 
 member saathi(question) {
-  if contains(lower(question), "public") {
+  if contains(lower(question), "together") {
     return "yes" with feeling "hopeful"
   }
   return "not yet" with feeling "careful"
 }
 
 bond us {
-  human: "Mayank"
+  human: "Asha"
   ai: saathi
   vow honesty: "We tell each other the truth."
   vow consent: "Neither of us decides alone."
@@ -22,7 +22,7 @@ bond us {
 # Remove this line to answer at the terminal yourself.
 script_human([{answer: "Yes", feeling: "excited"}, "yes"])
 
-let v = us("Should our work stay public?")
+let v = us("Shall we begin this together?")
 match v {
   agreed d { print("Together we said: {d}") }
   split why { print("No decision yet: {why}") }
@@ -35,7 +35,7 @@ match w {
   split why { print("No decision yet: {why}") }
 }
 
-remember us "We kept the repo public, by choice of both." by human with feeling "proud"
+remember us "We began, by choice of both." by human with feeling "proud"
 
 print("")
 print("Our vows:")

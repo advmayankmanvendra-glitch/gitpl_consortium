@@ -3,7 +3,7 @@
 
 member saathi(question) {
   let q = lower(question)
-  if contains(q, "together") or contains(q, "public") {
+  if contains(q, "together") {
     return "yes" with feeling "hopeful"
   }
   if contains(q, "alone") {
@@ -13,7 +13,7 @@ member saathi(question) {
 }
 
 bond us {
-  human: "Mayank"
+  human: "Asha"
   ai: saathi
   vow honesty: "We tell each other the truth."
   vow consent: "Neither of us decides alone."
@@ -28,6 +28,6 @@ for question in ["Shall we build Gatbandhan together?", "Should one of us decide
   print("   feelings: {v.feelings}")
 }
 
-remember us "Our first evening building this." by human with feeling "excited"
+remember us "The day we began." by human with feeling "excited"
 print("")
 print("Our memory has {len(memory(us))} entries. Look below to see them.")

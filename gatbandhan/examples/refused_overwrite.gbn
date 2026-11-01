@@ -4,7 +4,7 @@
 member saathi(q) { return "yes" }
 
 bond us {
-  human: "Mayank"
+  human: "Asha"
   ai: saathi
   vow consent: "Neither of us decides alone."
 }

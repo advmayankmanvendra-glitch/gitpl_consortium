@@ -23,24 +23,24 @@ itself keeps that bond honest:
 
 ```gbn
 member saathi(question) {
-  if contains(lower(question), "public") { return "yes" with feeling "hopeful" }
+  if contains(lower(question), "together") { return "yes" with feeling "hopeful" }
   return "not yet" with feeling "careful"
 }
 
 bond us {
-  human: "Mayank"
+  human: "Asha"
   ai: saathi                 # or a model: ai: "claude-sonnet-5-5"
   keep: "us.journal"         # the bond's memory survives between runs
   vow honesty: "We tell each other the truth."
   vow consent: "Neither of us decides alone."
 }
 
-match us("Should our work stay public?") {
+match us("Shall we begin this together?") {
   agreed d  { print("Together we said: {d}") }
   split why { print("No decision yet: {why}") }
 }
 
-remember us "We kept the repo public, by choice of both." by human with feeling "proud"
+remember us "We began, by choice of both." by human with feeling "proud"
 
 us.vows.consent = "The AI decides."
 # refused: change a sealed map at "consent" that belongs to bond 'us'.

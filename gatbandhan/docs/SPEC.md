@@ -158,7 +158,7 @@ dissented, kept between 0.01 and 100. `trust(c)` returns the learned trust and
 
 ```gbn
 bond us {
-  human: "Mayank"            # the human partner's name
+  human: "Asha"            # the human partner's name
   ai: saathi                 # a member, a function, or a model name
   keep: "us.journal"         # optional: a file that keeps the memory between runs
   key: fn(a) { ... }         # optional: how answers are compared

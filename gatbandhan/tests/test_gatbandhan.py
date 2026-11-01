@@ -13,14 +13,14 @@ CLOCK = lambda: "2026-10-31T00:00:00+00:00"  # noqa: E731
 
 PARTNER = '''
 member saathi(q) {
-  if contains(lower(q), "public") { return "yes" with feeling "hopeful" }
+  if contains(lower(q), "together") { return "yes" with feeling "hopeful" }
   return "no" with feeling "careful"
 }
 '''
 
 BOND = PARTNER + '''
 bond us {
-  human: "Mayank"
+  human: "Asha"
   ai: saathi
   vow honesty: "We tell each other the truth."
 }
@@ -235,28 +235,28 @@ class Bonds(unittest.TestCase):
     def test_both_must_agree(self):
         src = BOND + '''
         script_human([{answer: "Yes ", feeling: "excited"}, "yes"])
-        let a = us("Stay public?")
+        let a = us("Together?")
         let b = us("Ship it now?")
         print(a.agreed, a.decision, a.feelings)
         print(b.agreed, b.reason, b.votes)
         '''
         self.assertEqual(output(src).splitlines(), [
-            'true Yes {Mayank: "excited", saathi: "hopeful"}',
-            'false the partners disagree {Mayank: "yes", saathi: "no"}',
+            'true Yes {Asha: "excited", saathi: "hopeful"}',
+            'false the partners disagree {Asha: "yes", saathi: "no"}',
         ])
 
     def test_silence_is_not_consent(self):
-        out, it = run(BOND + 'let v = us("Stay public?")', stdin="")
+        out, it = run(BOND + 'let v = us("Together?")', stdin="")
         v = it.globals.vars["v"]
         self.assertFalse(v.agreed)
-        self.assertEqual(v.reason, "no consent: Mayank did not answer")
+        self.assertEqual(v.reason, "no consent: Asha did not answer")
 
     def test_human_answers_from_the_terminal(self):
-        out, it = run(BOND + 'let v = us("Stay public?")', stdin="yes\nhopeful too\n")
+        out, it = run(BOND + 'let v = us("Together?")', stdin="yes\nhopeful too\n")
         v = it.globals.vars["v"]
         self.assertTrue(v.agreed)
-        self.assertEqual(v.feelings["Mayank"], "hopeful too")
-        self.assertIn("Mayank, Stay public?", out)
+        self.assertEqual(v.feelings["Asha"], "hopeful too")
+        self.assertIn("Asha, Together?", out)
 
     def test_model_partner(self):
         src = '''
@@ -274,9 +274,9 @@ class Bonds(unittest.TestCase):
         for e in memory(us) { print(e.n, e.kind, e.by, e.text, e.feeling, e.amends) }
         '''
         self.assertEqual(output(src).splitlines(), [
-            "1 bond both Mayank and saathi formed the bond 'us' none none",
+            "1 bond both Asha and saathi formed the bond 'us' none none",
             "2 vow both We tell each other the truth. none none",
-            "3 memory Mayank We met. shy none",
+            "3 memory Asha We met. shy none",
             "4 amend both We met on a Saturday. none 3",
         ])
 
@@ -355,12 +355,12 @@ class Bits(unittest.TestCase):
     def test_consent_is_an_and_gate(self):
         src = BOND + '''
         script_human(["yes", "yes"])
-        for q in ["public?", "rush?", "there?"] { let v = us(q) print(v.gate, v.bits) }
+        for q in ["together?", "rush?", "there?"] { let v = us(q) print(v.gate, v.bits) }
         '''
         self.assertEqual(output(src).splitlines(), [
-            "1 ∧ 1 = 1 {Mayank: 1, saathi: 1}",
-            "1 ∧ 0 = 0 {Mayank: 1, saathi: 0}",
-            "0 ∧ 1 = 0 {Mayank: 0, saathi: 1}",
+            "1 ∧ 1 = 1 {Asha: 1, saathi: 1}",
+            "1 ∧ 0 = 0 {Asha: 1, saathi: 0}",
+            "0 ∧ 1 = 0 {Asha: 0, saathi: 1}",
         ])
 
     def test_coalition_gate(self):
@@ -381,7 +381,7 @@ class Bits(unittest.TestCase):
         self.assertEqual(g["s"].value, int(g["b"], 16))
 
     def test_signal(self):
-        src = BOND + 'script_human(["yes", "yes"]) print(us("public?").signal, us("rush?").signal)'
+        src = BOND + 'script_human(["yes", "yes"]) print(us("together?").signal, us("rush?").signal)'
         self.assertEqual(output(src), "0b11 0b10\n")
 
 
@@ -390,7 +390,7 @@ class KeptBonds(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.path = os.path.join(self.dir, "us.journal")
 
-    def kept(self, vows='vow honesty: "We tell each other the truth."', human="Mayank", extra=""):
+    def kept(self, vows='vow honesty: "We tell each other the truth."', human="Asha", extra=""):
         return PARTNER + f'''
         bond us {{
           human: "{human}"

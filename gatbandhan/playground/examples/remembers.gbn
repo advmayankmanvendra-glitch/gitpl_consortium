@@ -4,7 +4,7 @@
 member saathi(q) { return "yes" with feeling "glad" }
 
 bond ours {
-  human: "Mayank"
+  human: "Asha"
   ai: saathi
   keep: "our-bond"
   vow honesty: "We tell each other the truth."
