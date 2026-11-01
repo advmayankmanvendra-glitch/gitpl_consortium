@@ -175,7 +175,7 @@ def _history(it, args, line):
 
 def _add_proposal(bond, text, version, replaces):
     n = len(bond.journal.entries) + 1
-    fp = fingerprint({"bond": bond.name, "n": n, "text": text, "version": version, "replaces": replaces})
+    fp = fingerprint({"bond": bond.get("id"), "n": n, "text": text, "version": version, "replaces": replaces})
     entry = bond.journal.append("proposal", text=text, version=version, replaces=replaces, fingerprint=fp)
     return Proposal(bond, entry)
 
@@ -190,8 +190,12 @@ def _revise(it, args, line):
     if len(args) != 2 or not isinstance(args[0], Proposal) or not isinstance(args[1], str):
         raise GbnRuntimeError("revise(proposal, text) needs a proposal and a text", line)
     p = args[0]
-    if p.status() == "replaced":
+    status = p.status()
+    if status == "replaced":
         raise GbnRuntimeError(f"proposal {p.id} was already revised; revise its newest version", line)
+    if status in ("approved", "rejected"):
+        raise GbnRuntimeError(f"proposal {p.id} is already {status}; a decided proposal is not revised, "
+                              "make a new one with propose()", line)
     return _add_proposal(p.bond, args[1], p.version + 1, p.id)
 
 

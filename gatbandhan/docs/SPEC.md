@@ -169,6 +169,9 @@ bond us {
 }
 ```
 
+A bond's fields are `name`, `id` (the hash of the entry that formed it, the same in every
+run), `human`, `ai`, `vows`, `memory` and `seal`.
+
 ### 7.1 Deciding together
 
 `us(question)` asks both partners the same question and returns a verdict.
@@ -246,7 +249,10 @@ Each entry holds the SHA-256 hash of the previous entry plus its own content, so
 - the next run continues the same bond, with its vows and memory;
 - a program that names different partners for the file is refused;
 - a vow made in an earlier run cannot be changed by a later program;
-- a file whose entries were edited, removed or reordered is refused on open.
+- a file whose entries were edited, removed or reordered is refused on open;
+- if another program writes to the same file while this one runs, this one stops at
+  its next write instead of forking the history. This detects a second writer; it is
+  not a lock.
 
 The file belongs to its owner, who can still delete it. Gatbandhan makes tampering
 evident, not impossible.
@@ -265,13 +271,16 @@ for q in proposals(us) { print(q) }          # every proposal, also from earlier
 
 - `propose(bond, text)` writes a `proposal` entry and returns the proposal. Its
   **fingerprint** is the SHA-256 of `{bond, n, text, version, replaces}` written as
-  canonical JSON (sorted keys, no spaces), where `n` is its entry number.
+  canonical JSON (sorted keys, no spaces), where `bond` is the bond's `id` and `n` is
+  the proposal's entry number. A bond's `id` (`us.id`) is the hash of the entry that
+  formed it, so two bonds with the same name still give different fingerprints.
 - Asking the bond a proposal, `us(p)`, works like a question, and the `decision` entry
   records the proposal's fingerprint (`proposal`) and number (`proposal_id`). An answer
   always belongs to one fingerprint, so it can never count for a different text.
 - `revise(p, text)` makes a new proposal with `version` one higher and `replaces` set to
-  the old one's number. Approvals of the old version do not carry over. Only the newest
-  version can be revised.
+  the old one's number. Answers to the old version do not carry over. Only the newest
+  version of a proposal that is still `pending` or `disagreed` can be revised; to
+  revisit a decided proposal, make a new one with `propose`.
 - `proposals(bond)` lists every proposal in the bond's memory, so with `keep:` a proposal
   made in one run can be answered in a later one.
 

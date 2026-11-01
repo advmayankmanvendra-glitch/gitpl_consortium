@@ -207,7 +207,7 @@ class Bond:
     vow_lines: dict = field(default_factory=dict)
     journal: object = None                         # journal.Journal
 
-    FIELDS = ("name", "human", "ai", "vows", "memory", "seal")
+    FIELDS = ("name", "id", "human", "ai", "vows", "memory", "seal")
 
     def get(self, name):
         if name == "name":
@@ -222,6 +222,11 @@ class Bond:
             return seal(self.journal.public_entries(), self.name)
         if name == "seal":
             return self.journal.head
+        if name == "id":
+            # The fingerprint of the entry that formed the bond: it never changes and
+            # differs between bonds, even bonds with the same name.
+            formed = self.journal.find("bond")
+            return formed[0]["hash"] if formed else None
         return None
 
 

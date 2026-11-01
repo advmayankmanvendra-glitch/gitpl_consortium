@@ -82,6 +82,16 @@ function check(name, ok, detail) {
   check("waiting proposal is decided later", (await runP('script_human(["yes"]) let p = proposals(us)[0] print(us(p).outcome, p.status)')) === "approved approved");
   check("decided proposal is not decided again", (await runP('us(proposals(us)[0])')) === "BondError");
 
+  // a second program writing the same memory stops the first instead of forking history
+  const store3 = new G.MemoryStore();
+  const prog = `member s(q) { return "yes" } bond us { human: "M" ai: s keep: "c" }`;
+  const other = new G.Interpreter({ print: () => {}, store: store3 });
+  const first = new G.Interpreter({ print: () => {}, store: store3,
+    ask: async () => { await other.run(prog + ' remember us "from the other program"'); return "ok"; } });
+  let clash = "";
+  try { await first.run(prog + ' hear("wait") remember us "from the first program"'); } catch (e) { clash = e.message; }
+  check("second writer is stopped", clash.includes("changed by another program"), clash);
+
   // the human partner answers through the ask callback
   const answers = ["yes", "glad", ""];
   const lines = [];

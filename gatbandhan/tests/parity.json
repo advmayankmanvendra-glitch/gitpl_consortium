@@ -257,7 +257,7 @@
  },
  {
   "source": "member s(q) { if contains(q, \"tests\") { return \"yes\" with feeling \"calm\" } return \"no\" } bond us { human: \"Asha\" ai: s } script_human([none, \"yes\", \"yes\"]) let p = propose(us, \"Ship version 2\") print(p, p.status, p.rounds, p.fingerprint) us(p) print(p.status) let v = us(p) print(v.outcome, p.status, p.rounds) let p2 = revise(p, \"Ship version 2 after the tests pass\") print(p.status, p2, p2.replaces, p2.version, p2.fingerprint, p2 == p, p == p) let w = us(p2) print(w.outcome, w.proposal, p2.status, len(proposals(us)), us.seal) for e in memory(us) { print(e.n, e.kind, e.text, e.proposal_id, e.outcome) }",
-  "output": "<proposal 2 v1 pending: \"Ship version 2\"> pending 0 6c852c3d61faa388d8c354c42e9c396bc1cf168e66dc61608d00c559ecfcedcb\npending\ndisagreed disagreed 2\nreplaced <proposal 5 v2 pending: \"Ship version 2 after the tests pass\"> 2 2 7376ce9dc4fa54b190d86db67fd96704c18728485a32099ea6f5bd2efd046ec0 false true\napproved <proposal 5 v2 approved: \"Ship version 2 after the tests pass\"> approved 2 9d0b8a01609c9dfbac2d87a69d14b23de37a0c892e96db7de53bfece52537546\n1 bond Asha and s formed the bond 'us' none none\n2 proposal Ship version 2 none none\n3 decision Ship version 2 (no consent: Asha did not answer) 2 silent\n4 decision Ship version 2 (the partners disagree) 2 disagreed\n5 proposal Ship version 2 after the tests pass none none\n6 decision Ship version 2 after the tests pass (both approve) 5 approved\n"
+  "output": "<proposal 2 v1 pending: \"Ship version 2\"> pending 0 6756287bb4c6dcab592e507ec3ba76aec69ed302813d8273c8fb7d520f80bbaf\npending\ndisagreed disagreed 2\nreplaced <proposal 5 v2 pending: \"Ship version 2 after the tests pass\"> 2 2 a840b655246967d493373ba7b0156ce229f144296c0a25f38eff4b3f28e37d73 false true\napproved <proposal 5 v2 approved: \"Ship version 2 after the tests pass\"> approved 2 53976756a712d7e6443a3bb897f8d22ea974d463ef808d962cbcdf8e565dfb11\n1 bond Asha and s formed the bond 'us' none none\n2 proposal Ship version 2 none none\n3 decision Ship version 2 (no consent: Asha did not answer) 2 silent\n4 decision Ship version 2 (the partners disagree) 2 disagreed\n5 proposal Ship version 2 after the tests pass none none\n6 decision Ship version 2 after the tests pass (both approve) 5 approved\n"
  },
  {
   "source": "member s(q) { return \"no\" } bond us { human: \"Asha\" ai: s } script_human([\"no\"]) let p = propose(us, \"Rush\") us(p) print(p.status) us(p)",
@@ -282,5 +282,9 @@
  {
   "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") print(p.colour)",
   "output": "GbnRuntimeError: line 1: a proposal has no field 'colour'\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let p = propose(us, \"a\") us(p) print(us.id, p.status) revise(p, \"b\")",
+  "output": "ce83fc123efe8a76c247425b465c323bca849ae38cc4f208fb5dd15b1b6930da approved\nGbnRuntimeError: line 1: proposal 2 is already approved; a decided proposal is not revised, make a new one with propose()\n"
  }
 ]

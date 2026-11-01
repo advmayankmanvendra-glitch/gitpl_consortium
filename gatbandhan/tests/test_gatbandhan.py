@@ -474,15 +474,51 @@ class Proposals(unittest.TestCase):
             self.assertIn(f"it is already {status}", str(ctx.exception))
 
     def test_an_old_approval_never_covers_a_revised_proposal(self):
+        # The AI said yes to version 1; that yes does not count for version 2.
         src = BOND + '''
-        script_human(["yes", "no"])
+        script_human(["no", "yes"])
         let p = propose(us, "Do this together")
         us(p)
-        let p2 = revise(p, "Do this together, and also alone")
-        print(p.status, p2.status, p2.version, p2.replaces, p2 == p)
-        print(us(p2).outcome, p2.status)
+        let p2 = revise(p, "Do this together, carefully")
+        print(p.status, p2.status, p2.rounds, p2.version, p2.replaces, p2 == p)
+        print(us(p2).outcome, p2.status, p2.rounds)
         '''
-        self.assertEqual(output(src), "approved pending 2 3 false\ndisagreed disagreed\n")
+        self.assertEqual(output(src), "replaced pending 0 2 3 false\napproved approved 1\n")
+
+    def test_a_decided_proposal_is_not_revised(self):
+        for answer, status in (("yes", "approved"), ("no", "rejected")):
+            src = PARTNER + '''
+            bond us { human: "Asha" ai: saathi }
+            script_human(["%s"])
+            let p = propose(us, "Rush this")
+            if "%s" == "yes" { p = propose(us, "Do this together") }
+            us(p)
+            revise(p, "Something else")
+            ''' % (answer, answer)
+            with self.assertRaises(GbnRuntimeError) as ctx:
+                run(src)
+            self.assertIn(f"already {status}", str(ctx.exception))
+
+    def test_same_named_bonds_give_different_fingerprints(self):
+        prints = []
+        for clock in ("2026-11-01T10:00:00+00:00", "2026-11-01T10:00:01+00:00"):
+            out = io.StringIO()
+            it = Interpreter(out=out, stdin=io.StringIO(), clock=lambda c=clock: c)
+            it.run(BOND + 'let p = propose(us, "Same words") print(us.id, p.fingerprint)')
+            prints.append(out.getvalue().split())
+        self.assertNotEqual(prints[0][0], prints[1][0])
+        self.assertNotEqual(prints[0][1], prints[1][1])
+
+    def test_a_second_writer_is_stopped_instead_of_forking_history(self):
+        from gatbandhan.journal import Journal
+        path = os.path.join(tempfile.mkdtemp(), "us.journal")
+        first = Journal(path, clock=CLOCK)
+        first.append("bond", text="formed")
+        second = Journal(path, clock=CLOCK)       # opens the same memory
+        second.append("memory", text="from the second program")
+        with self.assertRaises(GbnRuntimeError):
+            first.append("memory", text="from the first program")
+        self.assertEqual(len(Journal(path, clock=CLOCK).entries), 2)
 
     def test_an_old_version_cannot_be_reused(self):
         src = BOND + '''

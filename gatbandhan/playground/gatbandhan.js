@@ -584,7 +584,7 @@
     }
   }
 
-  const BOND_FIELDS_READ = ["name", "human", "ai", "vows", "memory", "seal"];
+  const BOND_FIELDS_READ = ["name", "id", "human", "ai", "vows", "memory", "seal"];
 
   // A proposal the bond decides on. Its fingerprint never changes; a revision is a new
   // proposal. Its status is read from the bond's memory, so it survives between runs.
@@ -618,6 +618,12 @@
       if (name === "vows") return seal(this.vows, this.name);
       if (name === "memory") return seal(this.journal.publicEntries(), this.name);
       if (name === "seal") return this.journal.head;
+      if (name === "id") {
+        // The fingerprint of the entry that formed the bond: it never changes and
+        // differs between bonds, even bonds with the same name.
+        const formed = this.journal.find("bond");
+        return formed.length ? formed[0].hash : null;
+      }
       return null;
     }
   }
@@ -821,11 +827,13 @@
   class Journal {
     constructor(key, store, clock) {
       this.key = key; this.store = store; this.clock = clock; this.entries = [];
+      this.seen = "";   // the stored text this journal has read or written
     }
     async load() {
       if (!this.key) return;
       const raw = this.store.getItem("gatbandhan:" + this.key);
       if (!raw) return;
+      this.seen = raw;
       let prev = GENESIS;
       const lines = raw.split("\n").filter(l => l.trim());
       for (let i = 0; i < lines.length; i++) {
@@ -847,11 +855,17 @@
       const body = { n: this.entries.length + 1, kind, at: this.clock(), prev: this.head };
       for (const [k, v] of Object.entries(fields)) if (v !== null && v !== undefined) body[k] = jsonable(v);
       const entry = Object.assign({}, body, { hash: await sha256(body.prev + canonical(body)) });
-      this.entries.push(entry);
       if (this.key) {
         const old = this.store.getItem("gatbandhan:" + this.key) || "";
-        this.store.setItem("gatbandhan:" + this.key, old + canonical(entry) + "\n");
+        if (old !== this.seen) {
+          // Someone else wrote to (or cut) the memory since we read it. Appending now
+          // would fork the history, so stop instead.
+          throw new GbnRuntimeError(`bond memory '${this.key}' was changed by another program while this one was running; run again to continue from the new history`);
+        }
+        this.seen = old + canonical(entry) + "\n";
+        this.store.setItem("gatbandhan:" + this.key, this.seen);
       }
+      this.entries.push(entry);
       return entry;
     }
     find(kind) { return this.entries.filter(e => e.kind === kind); }
@@ -1605,7 +1619,7 @@
     def("memory", ([b]) => { if (!(b instanceof Bond)) err("memory(b) needs a bond"); return b.get("memory"); });
     const addProposal = async (bond, text, version, replaces) => {
       const n = bond.journal.entries.length + 1;
-      const fp = await sha256(canonical({ bond: bond.name, n, text, version, replaces }));
+      const fp = await sha256(canonical({ bond: bond.get("id"), n, text, version, replaces }));
       return new Proposal(bond, await bond.journal.append("proposal", { text, version, replaces, fingerprint: fp }));
     };
     def("propose", async (args) => {
@@ -1615,7 +1629,11 @@
     def("revise", async (args) => {
       if (args.length !== 2 || !(args[0] instanceof Proposal) || typeof args[1] !== "string") err("revise(proposal, text) needs a proposal and a text");
       const p = args[0];
-      if (p.status() === "replaced") err(`proposal ${p.id} was already revised; revise its newest version`);
+      const status = p.status();
+      if (status === "replaced") err(`proposal ${p.id} was already revised; revise its newest version`);
+      if (status === "approved" || status === "rejected") {
+        err(`proposal ${p.id} is already ${status}; a decided proposal is not revised, make a new one with propose()`);
+      }
       return addProposal(p.bond, args[1], p.version + 1, p.id);
     });
     def("proposals", ([b]) => {
