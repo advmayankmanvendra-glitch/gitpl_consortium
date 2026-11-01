@@ -68,6 +68,20 @@ function check(name, ok, detail) {
   try { await it.run(kept("truth")); } catch (e) { msg = e.message; }
   check("hand-edited memory is refused", msg.includes("changed by hand"), msg);
 
+  // a proposal waits across runs, then is decided
+  const store2 = new G.MemoryStore();
+  const keptP = extra => `member s(q) { return "yes" } bond us { human: "M" ai: s keep: "p" } ${extra}`;
+  const runP = async extra => {
+    const out = [];
+    const it = new G.Interpreter({ print: l => out.push(l), store: store2 });
+    try { await it.run(keptP(extra)); } catch (e) { out.push(e.constructor.name); }
+    return out.join(" ");
+  };
+  await runP('script_human([none]) us(propose(us, "Begin?"))');
+  check("proposal waits across runs", (await runP('let p = proposals(us)[0] print(p.status, p.rounds)')) === "pending 1");
+  check("waiting proposal is decided later", (await runP('script_human(["yes"]) let p = proposals(us)[0] print(us(p).outcome, p.status)')) === "approved approved");
+  check("decided proposal is not decided again", (await runP('us(proposals(us)[0])')) === "BondError");
+
   // the human partner answers through the ask callback
   const answers = ["yes", "glad", ""];
   const lines = [];

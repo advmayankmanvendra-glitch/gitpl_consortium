@@ -52,6 +52,7 @@ Files use the extension `.gbn` and are UTF-8 text.
 | `coalition` | `coalition c(x) { ... }` | calling it returns a verdict |
 | `bond` | `bond us { ... }` | calling it returns a verdict |
 | `verdict` | | the outcome of a coalition or bond |
+| `proposal` | `propose(us, "text")` | something a bond decides on, with its own fingerprint (section 7.6) |
 
 Falsy values: `false`, `none`, `0`, bits that are all 0, `""`, `[]`, `{}`. Everything else is truthy.
 `==` compares by value (lists and maps deeply).
@@ -234,7 +235,8 @@ is written into the bond's memory as a `refused` entry.
 - declaring the bond a second time, or a function, member or coalition with its name;
 - setting any field of the bond (`us.human = ...`);
 - changing a vow, or anything inside a vow's value;
-- changing the memory or anything inside it.
+- changing the memory or anything inside it;
+- asking a proposal that is already approved, rejected or replaced (section 7.6).
 
 ### 7.5 Kept bonds
 
@@ -249,12 +251,52 @@ Each entry holds the SHA-256 hash of the previous entry plus its own content, so
 The file belongs to its owner, who can still delete it. Gatbandhan makes tampering
 evident, not impossible.
 
+### 7.6 Proposals
+
+A plain question is decided once, on the spot. A **proposal** is something the bond
+decides on that has its own identity, can wait, and can be revised.
+
+```gbn
+let p = propose(us, "Ship version 2")       # written into memory, status "pending"
+let v = us(p)                                # both partners answer this exact proposal
+let p2 = revise(p, "Ship version 2 after the tests pass")   # version 2, a new proposal
+for q in proposals(us) { print(q) }          # every proposal, also from earlier runs
+```
+
+- `propose(bond, text)` writes a `proposal` entry and returns the proposal. Its
+  **fingerprint** is the SHA-256 of `{bond, n, text, version, replaces}` written as
+  canonical JSON (sorted keys, no spaces), where `n` is its entry number.
+- Asking the bond a proposal, `us(p)`, works like a question, and the `decision` entry
+  records the proposal's fingerprint (`proposal`) and number (`proposal_id`). An answer
+  always belongs to one fingerprint, so it can never count for a different text.
+- `revise(p, text)` makes a new proposal with `version` one higher and `replaces` set to
+  the old one's number. Approvals of the old version do not carry over. Only the newest
+  version can be revised.
+- `proposals(bond)` lists every proposal in the bond's memory, so with `keep:` a proposal
+  made in one run can be answered in a later one.
+
+A proposal's fields are `id`, `version`, `text`, `fingerprint`, `replaces`, `bond`,
+`rounds` (how many times it was asked) and `status`, which is read from memory each time:
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | not decided yet: never asked, or only met with silence |
+| `disagreed` | the last time it was asked, the partners answered differently; it can be asked again |
+| `approved` | both said yes; final |
+| `rejected` | both said no; final |
+| `replaced` | a newer version exists; final |
+
+Asking a proposal that is `approved`, `rejected` or `replaced` is refused like an
+overwrite: a decided proposal stays decided, and an old version is never reused.
+Silence and disagreement never close a proposal, so it can wait as long as needed.
+
 ## 8. Verdicts
 
 | Field | Meaning |
 | --- | --- |
 | `outcome` | for a bond: `approved`, `rejected`, `disagreed` or `silent`; for a coalition: `agreed` or `split` |
 | `approved` | for a bond, true only when both said yes to the same thing; for a coalition, the same as `agreed` |
+| `proposal` | for a bond asked a proposal, that proposal; otherwise `none` |
 | `agreed` | whether a decision was reached (for a bond: whether the answers match, so a mutual rejection is agreed but not approved) |
 | `decision` | the decided answer, or `none` |
 | `reason` | why, for example `majority`, `vetoed by m`, `both approve` |
@@ -309,7 +351,8 @@ Partners and models: `hear(prompt)` reads a line from the human (or `none`);
 an offline model that gives the replies in order. A model whose name starts with
 `claude` is called through the Anthropic Messages API when `ANTHROPIC_API_KEY` is set.
 
-Bonds and coalitions: `vows(bond)`, `memory(bond)`, `trust(coalition)`,
+Bonds and coalitions: `vows(bond)`, `memory(bond)`, `propose(bond, text)`,
+`revise(proposal, text)`, `proposals(bond)` (section 7.6), `trust(coalition)`,
 `history(coalition)`.
 
 ## 10. Errors

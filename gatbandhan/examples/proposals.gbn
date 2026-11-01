@@ -1,0 +1,42 @@
+# A proposal is something the bond decides on that keeps its identity.
+# It has its own fingerprint, it can wait for an answer, and when it is
+# revised, the earlier answers do not count for the new version.
+
+member saathi(question) {
+  if contains(question, "tests pass") { return "yes" with feeling "relieved" }
+  return "no" with feeling "careful"
+}
+
+bond us {
+  human: "Asha"
+  ai: saathi
+  vow consent: "Neither of us decides alone."
+}
+
+# The human's answers are scripted so the example runs without a keyboard.
+script_human([none, "yes", "yes"])
+
+let p = propose(us, "Ship version 2 today")
+print("{p}")
+print("  fingerprint: {p.fingerprint}")
+
+# No answer yet: the proposal simply waits.
+let v = us(p)
+print("{v.gate}  {v.outcome}, so it is still {p.status}")
+
+# The partners see it differently. Nothing is decided, and nothing is lost.
+let w = us(p)
+print("{w.gate}  {w.outcome}: {w.reason}")
+
+# A revised proposal is a new version with a new fingerprint.
+let p2 = revise(p, "Ship version 2 once the tests pass")
+print("")
+print("{p2}  (replaces proposal {p2.replaces})")
+let x = us(p2)
+print("{x.gate}  {x.outcome}, after {p2.rounds} round")
+
+print("")
+for q in proposals(us) {
+  print("proposal {q.id}, version {q.version}: {q.status} after {q.rounds} rounds")
+}
+# Asking the old version again would be refused: us(p)

@@ -62,12 +62,13 @@ class Verdict:
     question: object = None
     rule: str = ""
     partners: tuple = ()   # for a bond: (human name, ai name)
+    proposal: object = None  # the Proposal decided on, if one was asked
     outcome: str = ""      # for a bond: approved, rejected, disagreed or silent
     marks: dict = field(default_factory=dict)  # for a bond: partner -> 1, 0 or None (silent)
 
     FIELDS = ("agreed", "decision", "reason", "votes", "abstained", "dissent",
               "tally", "margin", "tiebreak", "coalition", "feelings", "question",
-              "bits", "signal", "gate", "rule", "outcome", "approved")
+              "bits", "signal", "gate", "rule", "outcome", "approved", "proposal")
 
     @property
     def approved(self):
@@ -224,6 +225,49 @@ class Bond:
         return None
 
 
+class Proposal:
+    """A proposal the bond decides on. Its fingerprint never changes; a revision is a new proposal.
+
+    Its status is read from the bond's memory each time, so it survives between runs:
+    pending (not decided yet, or only met with silence), disagreed, approved, rejected,
+    or replaced (a newer version exists).
+    """
+    FIELDS = ("id", "version", "text", "fingerprint", "replaces", "status", "rounds", "bond")
+
+    def __init__(self, bond, entry):
+        self.bond = bond
+        self.id = entry["n"]
+        self.version = entry["version"]
+        self.text = entry["text"]
+        self.fingerprint = entry["fingerprint"]
+        self.replaces = entry.get("replaces")
+
+    def __deepcopy__(self, memo):
+        return self   # a proposal cannot change, so copies may share it
+
+    def rounds(self):
+        return [e for e in self.bond.journal.entries
+                if e["kind"] == "decision" and e.get("proposal") == self.fingerprint]
+
+    def status(self):
+        outcomes = [e.get("outcome") for e in self.rounds()]
+        for final in ("approved", "rejected"):
+            if final in outcomes:
+                return final
+        if any(e["kind"] == "proposal" and e.get("replaces") == self.id for e in self.bond.journal.entries):
+            return "replaced"
+        return "disagreed" if outcomes and outcomes[-1] == "disagreed" else "pending"
+
+    def get(self, name):
+        if name == "status":
+            return self.status()
+        if name == "rounds":
+            return len(self.rounds())
+        if name == "bond":
+            return self.bond.name
+        return getattr(self, name)
+
+
 def type_name(v):
     if v is None:
         return "none"
@@ -245,6 +289,8 @@ def type_name(v):
         return "bond"
     if isinstance(v, Verdict):
         return "verdict"
+    if isinstance(v, Proposal):
+        return "proposal"
     if isinstance(v, Bits):
         return "bits"
     if isinstance(v, Callable):
@@ -274,6 +320,8 @@ def show(v, quote=False):
         return "[" + ", ".join(show(x, True) for x in v) + "]"
     if isinstance(v, dict):
         return "{" + ", ".join(f"{_key(k)}: {show(x, True)}" for k, x in v.items()) + "}"
+    if isinstance(v, Proposal):
+        return f"<proposal {v.id} v{v.version} {v.status()}: {show(v.text, True)}>"
     if isinstance(v, Verdict):
         if v.outcome in ("approved", "rejected"):
             return f"<verdict {v.coalition}: {v.outcome} {show(v.decision, True)} ({v.reason})>"
@@ -311,4 +359,6 @@ def freeze(v):
         return ("list", tuple(freeze(x) for x in v))
     if isinstance(v, dict):
         return ("map", tuple(sorted((str(k), freeze(x)) for k, x in v.items())))
+    if isinstance(v, Proposal):
+        return ("proposal", v.fingerprint)
     return ("id", id(v))

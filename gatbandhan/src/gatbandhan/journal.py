@@ -36,6 +36,12 @@ def _digest(prev, body):
     return hashlib.sha256((prev + text).encode("utf-8")).hexdigest()
 
 
+def fingerprint(obj):
+    """SHA-256 of a value written as canonical JSON (sorted keys, no spaces)."""
+    text = json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
