@@ -17,11 +17,16 @@ bond us {
 # The human's answers are scripted so the example runs without a keyboard.
 script_human(["yes", "yes", "yes", "yes", "yes", "yes", "yes"])
 
-# Three proposals. The tests are a standing permission: approved once, run many times.
-# The release needs the migration, so it waits for it.
-let tests = propose(us, "Run the tests whenever the code changes", {standing: true})
+# Each proposal names the exact action it allows. Only that action can ever run under it.
+let run_tests = fn() { print("Running the tests... all pass") }
+let release_v2 = fn(version) { print("Releasing version {version}") }
+
+# Three proposals. The tests are a standing permission: approved once, run up to 10 times,
+# until the end of the year. The release needs the migration, so it waits for it.
+let tests = propose(us, "Run the tests whenever the code changes",
+                    {standing: true, action: run_tests, limit: 10, expires: "2026-12-31"})
 let migrate = propose(us, "migrate to the new database")
-let release = propose(us, "Release version 2", {needs: [migrate]})
+let release = propose(us, "Release version 2", {needs: [migrate], action: release_v2, args: ["2"]})
 
 print("Tests: {us(tests).outcome}")
 print("Release: {us(release).outcome}, but it needs proposal {release.blocked_by}")
@@ -37,8 +42,8 @@ print("  status: {migrate.status}. Flagged for review, never turned into a yes."
 
 # The project does not stop: approved, independent work carries on.
 print("")
-act(tests, fn() { print("Running the tests... all pass") })
-act(tests, fn() { print("Running the tests again... all pass") })
+act(tests, run_tests)
+act(tests, run_tests)
 print("The tests ran {tests.uses} times. Release ready? {release.ready}")
 
 print("")
@@ -52,6 +57,7 @@ print("Revised migration: {us(migrate2).outcome}")
 
 # The old release was tied to the old migration, so it stays blocked.
 # A new release proposal names the new one, and only then can it run.
-let release2 = propose(us, "Release version 2", {needs: [migrate2]})
+let release2 = propose(us, "Release version 2", {needs: [migrate2], action: release_v2, args: ["2"]})
 print("New release: {us(release2).outcome}, ready? {release2.ready}")
-act(release2, fn() { print("Releasing version 2") })
+act(release2, release_v2)
+print("Every action is written down: {release2.actions}")

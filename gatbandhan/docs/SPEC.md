@@ -245,8 +245,9 @@ is written into the bond's memory as a `refused` entry.
 - changing a vow, or anything inside a vow's value;
 - changing the memory or anything inside it;
 - asking a proposal that is already approved, rejected or replaced (section 7.6);
-- acting on a proposal that is not approved, whose needs are not approved, or whose
-  one-time approval was already used (section 7.7).
+- acting on a proposal that is not approved, whose needs are not approved, that names no
+  action or a different one, that expired, that reached its limit, or whose one-time
+  approval was already used (section 7.7).
 
 ### 7.5 Kept bonds
 
@@ -277,9 +278,10 @@ for q in proposals(us) { print(q) }          # every proposal, also from earlier
 ```
 
 - `propose(bond, text, options?)` writes a `proposal` entry and returns the proposal.
-  The options are `{standing: true}` and `{needs: [proposals]}` (section 7.7). Its
-  **fingerprint** is the SHA-256 of `{bond, n, text, version, replaces}` (plus `standing`
-  and the needed proposals' fingerprints as `needs`, when given) written as
+  The options are `standing`, `needs`, `action`, `args`, `limit`, `expires` and `retry`
+  (section 7.7). Its **fingerprint** is the SHA-256 of `{bond, n, text, version,
+  replaces}` (plus every option given, with the needed proposals' fingerprints as
+  `needs` and the action's hash as `action`) written as
   canonical JSON (sorted keys, no spaces), where `bond` is the bond's `id` and `n` is
   the proposal's entry number. A bond's `id` (`us.id`) is the hash of the entry that
   formed it, so two bonds with the same name still give different fingerprints.
@@ -295,14 +297,15 @@ for q in proposals(us) { print(q) }          # every proposal, also from earlier
 
 A proposal's fields are `id`, `version`, `text`, `fingerprint`, `replaces`, `bond`,
 `rounds` (how many times it was asked), `status`, and the continuity fields of section
-7.7: `standing`, `needs`, `objections`, `uses`, `blocked_by` and `ready`. The status is
+7.7: `standing`, `needs`, `objections`, `uses`, `actions`, `blocked_by`, `ready`,
+`action`, `args`, `limit`, `expires` and `retry`. The status is
 read from memory each time:
 
 | Status | Meaning |
 | --- | --- |
 | `pending` | not decided yet: never asked, or only met with silence |
 | `disagreed` | the last time it was asked, the partners answered differently; it can be asked again |
-| `deadlocked` | still disagreed after 3 or more disagreeing rounds; open, and flagged for review |
+| `deadlocked` | the last round disagreed, and 3 or more rounds disagreed in all (not necessarily in a row); open, and flagged for review |
 | `approved` | both said yes; final |
 | `rejected` | both said no; final |
 | `replaced` | a newer version exists; final |
@@ -328,37 +331,67 @@ the decision's memory entry, and in the proposal's `objections` list
 (`{round, by, reason, condition}`).
 
 **Open decisions.** `unresolved(bond)` lists the proposals that are still `pending`,
-`disagreed` or `deadlocked`. After 3 disagreeing rounds a proposal is `deadlocked`: a
+`disagreed` or `deadlocked`. Once 3 rounds in all have disagreed (rounds of silence in
+between do not reset the count), a proposal whose last round disagreed is `deadlocked`: a
 signal to talk, add evidence, or revise it, never a decision. Asking it again is allowed,
 and only a yes from both approves it.
 
-**Approved work, and only approved work.** `act(proposal, fn() { ... })` runs the work
-only when the proposal is approved by both, and writes an `act` entry into memory before
-the work starts. Anything else is refused, remembered and stops the program:
+**Approved work, and only approved work.** A proposal that allows work names the exact
+work: `{action: fn() { ... }}`. The bond stores the SHA-256 of the function's source text
+(from `fn` to its closing `}`, exactly as written) as the proposal's `action`, so the
+partners approve this exact action. `act(proposal, work)` runs `work` only when it is that
+same action, with the arguments approved in `args` (a list of plain data: text, numbers,
+true/false, none, lists and maps). Anything else is refused, remembered and stops the
+program:
 
 - acting on a proposal that is not `approved` (pending, disagreed, deadlocked, rejected,
   replaced or revoked);
 - acting on a proposal whose `needs` are not all approved;
+- acting on a proposal that names no action;
+- acting with a function that is not the approved one, even if it differs by one space;
+- acting after the approval's `expires` date (`"2026-12-31"`: the date and time now,
+  shortened to the same length, is later than it);
+- acting when `limit` actions have already counted against the approval;
 - acting a second time on a one-time proposal.
 
 ```gbn
-let tests = propose(us, "Run the tests whenever code changes", {standing: true})
+let run_tests = fn() { print("all pass") }
+let deploy = fn(where) { print("deploying to", where) }
+let tests = propose(us, "Run the tests whenever code changes",
+                    {standing: true, action: run_tests, limit: 50, expires: "2026-12-31"})
 let migrate = propose(us, "Migrate the database")
-let release = propose(us, "Release version 2", {needs: [migrate]})
+let release = propose(us, "Release version 2", {needs: [migrate], action: deploy, args: ["staging"]})
+act(tests, run_tests)
 ```
 
-A proposal is one-time unless it is `standing: true`, which approves a kind of work that
-may run many times. `needs` lists proposals that must be approved first, so a disputed
-proposal blocks only the work that depends on it: above, the tests keep running while the
-migration is disputed, and only the release waits. `blocked_by` lists the needs that are
-not approved yet, `uses` counts the actions so far, and `ready` says whether `act` would
-run now. `revise` keeps `standing` and `needs` unless new options are given. A need names
-one exact version: if that proposal is replaced, the work that needed it stays blocked
-until it is proposed again naming the new version.
+A proposal is one-time unless it is `standing: true`, which approves the same action
+running many times, within its `limit` and before it `expires` when those are given.
+`needs` lists proposals that must be approved first, so a disputed proposal blocks only
+the work that depends on it: above, the tests keep running while the migration is
+disputed, and only the release waits. `blocked_by` lists the needs that are not approved
+yet, `uses` counts the actions started so far, and `ready` says whether `act` would run
+now. `revise` keeps every option unless new options are given. A need names one exact
+version: if that proposal is replaced, the work that needed it stays blocked until it is
+proposed again naming the new version.
+
+**Every action is recorded from start to end.** Before the work runs, an `act` entry
+(`state: "started"`) is written; after it, an `act_end` entry names that start in
+`execution` and says `succeeded` or `failed` (with the `error`). A start with no end means
+the program stopped part-way, and its state is `unknown`. A proposal's `actions` lists
+them all (`{id, state}`). Every started action counts against the approval, except that
+with `retry: true` a failed one does not, so a failed action may be tried again. Use
+`retry` only for work that is safe to repeat. An `unknown` action always counts, because
+it may have done its work.
+
+**What the action hash does not cover.** The hash covers the function's own text. Values
+the function reads from outside it (variables of the program around it) are not part of
+the approval, so whatever the action depends on should come in through `args`.
 
 **Withdrawing.** `revoke(proposal)` withdraws an approval and writes a `revoke` entry.
-Consent needs both partners, so either one may withdraw it alone. Past actions stay in
-memory; no future action runs under it.
+Consent needs both partners, so either one may withdraw it alone. Partners are not yet
+identified by signatures, so the entry is recorded as the program's (`by: "program"`,
+`verified: false`), never as a verified partner's withdrawal. Past actions stay in memory;
+no future action runs under it.
 
 **Outside the bond.** The human can always act outside Gatbandhan with ordinary tools.
 Such work is not recorded as a joint decision, and nothing may claim it was.

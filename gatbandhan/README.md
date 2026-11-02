@@ -13,8 +13,9 @@ itself keeps that bond honest:
   even across runs, until both decide. An approval belongs to that exact text: revise
   it and both must approve again, and a decided proposal is never decided twice.
 - **Disagreement doesn't stop the project.** A no can say why and what would change it.
-  Only work both partners approved can run, through `act`, and a disputed proposal
-  blocks only the work that needs it. Repeated disagreement is flagged as a deadlock,
+  Only work both partners approved can run, through `act`: the exact action they
+  approved, with the approved inputs, within its limit and expiry date, and every run is
+  recorded from start to finish. A disputed proposal blocks only the work that needs it. Repeated disagreement is flagged as a deadlock,
   never turned into consent.
 - **Vows cannot be overwritten.** Not by reassigning, not by shadowing, not by a
   member deep inside a coalition. Every attempt is refused, written into the bond's

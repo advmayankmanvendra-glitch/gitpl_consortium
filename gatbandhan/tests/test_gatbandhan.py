@@ -8,6 +8,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from gatbandhan import BondError, GatbandhanError, GbnRuntimeError, GbnSyntaxError, Interpreter  # noqa: E402
+from gatbandhan.values import Proposal  # noqa: E402
 
 CLOCK = lambda: "2026-10-31T00:00:00+00:00"  # noqa: E731
 
@@ -597,32 +598,39 @@ class Continuity(unittest.TestCase):
     def test_approved_independent_work_continues_while_another_is_disputed(self):
         src = BOND + '''
         script_human(["yes", "no", "yes"])
-        let tests = propose(us, "Run the tests together, whenever code changes", {standing: true})
+        let run_tests = fn() { print("tests ran") }
+        let release_it = fn() { print("never") }
+        let tests = propose(us, "Run the tests together, whenever code changes", {standing: true, action: run_tests})
         let migrate = propose(us, "Migrate the database together")
-        let release = propose(us, "Release together", {needs: [migrate]})
+        let release = propose(us, "Release together", {needs: [migrate], action: release_it})
         us(tests) us(migrate) us(release)
-        act(tests, fn() { print("tests ran") })
-        act(tests, fn() { print("tests ran again") })
+        act(tests, run_tests)
+        act(tests, run_tests)
         print(migrate.status, release.status, release.blocked_by, release.ready, tests.uses)
-        act(release, fn() { print("never") })
+        act(release, release_it)
         '''
+        out = io.StringIO()
+        it = Interpreter(out=out, stdin=io.StringIO(), clock=CLOCK)
         with self.assertRaises(BondError) as ctx:
-            out, it = run(src)
+            it.run(src)
         self.assertIn("it needs proposal 4, which is disagreed", str(ctx.exception))
+        self.assertEqual(out.getvalue().splitlines()[-3:],
+                         ["tests ran", "tests ran", "disagreed approved [4] false 2"])
 
     def test_act_needs_an_approval_and_a_one_time_approval_is_used_once(self):
         for script, extra, message in (
             ('["no"]', "", "it is disagreed, not approved by both"),
             ('[none]', "", "it is pending, not approved by both"),
-            ('["yes"]', 'act(p, fn() { print("once") })', "it allowed one action and it was used"),
+            ('["yes"]', "act(p, work)", "it allowed one action and it was used"),
             ('["yes"]', "revoke(p)", "it is revoked, not approved by both"),
         ):
             src = BOND + f'''
             script_human({script})
-            let p = propose(us, "Do this together")
+            let work = fn() {{ print("again") }}
+            let p = propose(us, "Do this together", {{action: work}})
             us(p)
             {extra}
-            act(p, fn() {{ print("again") }})
+            act(p, work)
             '''
             out = io.StringIO()
             it = Interpreter(out=out, stdin=io.StringIO(), clock=CLOCK)
@@ -631,16 +639,151 @@ class Continuity(unittest.TestCase):
             self.assertIn(message, str(ctx.exception))
             kinds = [e["kind"] for e in it.bonds["us"].journal.entries]
             self.assertEqual(kinds[-1], "refused")
-            self.assertNotIn("again", out.getvalue())
+            self.assertEqual(out.getvalue().count("again"), 1 if extra.startswith("act") else 0)
 
-    def test_every_action_is_written_down_before_it_runs(self):
+    def refused(self, src, clock=CLOCK):
+        out = io.StringIO()
+        it = Interpreter(out=out, stdin=io.StringIO(), clock=clock)
+        with self.assertRaises(BondError) as ctx:
+            it.run(BOND + src)
+        self.assertEqual(it.bonds["us"].journal.entries[-1]["kind"], "refused")
+        return str(ctx.exception), out.getvalue()
+
+    def test_only_the_exact_approved_action_can_run(self):
+        for other in ('fn() { print("something else") }', 'fn() { print("tests ran")  }',
+                      'fn(x) { print("tests ran") }'):
+            msg, out = self.refused(f'''
+            script_human(["yes"])
+            let run_tests = fn() {{ print("tests ran") }}
+            let p = propose(us, "Run the tests together", {{standing: true, action: run_tests}})
+            us(p)
+            act(p, {other})
+            ''')
+            self.assertIn("this is not the action both partners approved", msg)
+            self.assertEqual(out, "")
+
+    def test_a_proposal_without_an_action_cannot_be_acted_on(self):
+        msg, _ = self.refused('''
+        script_human(["yes"])
+        let p = propose(us, "Talk it over together")
+        us(p)
+        act(p, fn() { print("x") })
+        ''')
+        self.assertIn("it names no action", msg)
+
+    def test_the_action_gets_only_the_approved_arguments(self):
         out, it = run(BOND + '''
         script_human(["yes"])
-        let p = propose(us, "Do this together", {standing: true})
-        us(p)
-        act(p, fn() { print(memory(us)[len(memory(us)) - 1].kind) })
+        let deploy = fn(where, n) { print("deploying to", where, n) return n * 2 }
+        let p = propose(us, "Deploy to staging together", {action: deploy, args: ["staging", 2], standing: true})
+        print(us(p).outcome, p.args, len(p.action))
+        print(act(p, deploy))
         ''')
-        self.assertEqual(out, "act\n")
+        self.assertEqual(out.splitlines(), ['approved ["staging", 2] 64', "deploying to staging 2", "4"])
+
+    def test_args_are_part_of_what_both_approve(self):
+        out, _ = run(BOND + '''
+        let a = fn(x) { print(x) }
+        let p = propose(us, "Deploy", {action: a, args: ["staging"]})
+        let q = propose(us, "Deploy", {action: a, args: ["production"]})
+        print(p.fingerprint == q.fingerprint)
+        ''')
+        self.assertEqual(out, "false\n")
+
+    def test_a_standing_approval_has_a_limit_and_an_expiry(self):
+        msg, out = self.refused('''
+        script_human(["yes"])
+        let w = fn() { print("ran") }
+        let p = propose(us, "Back up nightly together", {standing: true, action: w, limit: 2})
+        us(p)
+        act(p, w) act(p, w) act(p, w)
+        ''')
+        self.assertIn("its limit of 2 uses is reached", msg)
+        self.assertEqual(out.count("ran"), 2)
+        msg, out = self.refused('''
+        script_human(["yes"])
+        let w = fn() { print("ran") }
+        let p = propose(us, "Back up nightly together", {standing: true, action: w, expires: "2025-12-31"})
+        us(p)
+        act(p, w)
+        ''')
+        self.assertIn("its approval expired on 2025-12-31", msg)
+        self.assertEqual(out, "")
+
+    def test_bad_options_are_refused_before_anything_is_proposed(self):
+        for opts, message in (
+            ('{action: print}', "'action' must be a function written in the program"),
+            ('{args: [1]}', "'args' must be a list, and needs an 'action'"),
+            ('{limit: 0}', "'limit' must be a whole number of 1 or more"),
+            ('{expires: 5}', "'expires' must be a date"),
+            ('{retry: "yes"}', "'retry' must be true or false"),
+            ('{when: 1}', "options are a map with any of"),
+        ):
+            with self.assertRaises(GbnRuntimeError) as ctx:
+                run(BOND + f'propose(us, "x", {opts})')
+            self.assertIn(message, str(ctx.exception))
+
+    def test_every_action_is_written_down_before_it_runs_and_its_end_after(self):
+        out, it = run(BOND + '''
+        script_human(["yes"])
+        let w = fn() { print(memory(us)[len(memory(us)) - 1].kind) }
+        let p = propose(us, "Do this together", {standing: true, action: w})
+        us(p)
+        act(p, w)
+        print(p.actions)
+        ''')
+        self.assertEqual(out.splitlines()[0], "act")
+        self.assertIn('state: "succeeded"', out)
+        kinds = [e["kind"] for e in it.bonds["us"].journal.entries]
+        self.assertEqual(kinds[-2:], ["act", "act_end"])
+
+    def test_a_failed_action_is_recorded_and_retry_decides_if_it_counts(self):
+        for retry, counted in (("false", 1), ("true", 0)):
+            out = io.StringIO()
+            it = Interpreter(out=out, stdin=io.StringIO(), clock=CLOCK)
+            with self.assertRaises(GbnRuntimeError):
+                it.run(BOND + f'''
+                script_human(["yes"])
+                let w = fn() {{ error("the disk is full") }}
+                let p = propose(us, "Copy the files together", {{action: w, retry: {retry}}})
+                us(p)
+                act(p, w)
+                ''')
+            bond = it.bonds["us"]
+            end = bond.journal.entries[-1]
+            self.assertEqual((end["kind"], end["state"]), ("act_end", "failed"))
+            self.assertIn("the disk is full", end["error"])
+            p = next(Proposal(bond, e) for e in bond.journal.entries if e["kind"] == "proposal")
+            self.assertEqual(p.counted_uses(), counted)
+            self.assertEqual(p.ready(), not counted)
+
+    def test_an_action_with_no_recorded_end_is_unknown_and_counts(self):
+        out, it = run(BOND + '''
+        script_human(["yes"])
+        let w = fn() { print("x") }
+        let p = propose(us, "Copy the files", {action: w, retry: true})
+        us(p)
+        ''')
+        bond = it.bonds["us"]
+        p = next(Proposal(bond, e) for e in bond.journal.entries if e["kind"] == "proposal")
+        # As if the program stopped between the start and the end of the action.
+        bond.journal.append("act", by="program", proposal=p.fingerprint, proposal_id=p.id, use=1,
+                            state="started", text="started")
+        self.assertEqual(p.actions()[0]["state"], "unknown")
+        self.assertEqual((p.counted_uses(), p.ready()), (1, False))
+
+    def test_revoke_is_recorded_as_the_program_not_a_verified_partner(self):
+        out, it = run(BOND + '''
+        script_human(["yes"])
+        let p = propose(us, "Do this together", {standing: true, action: fn() { print(1) }})
+        us(p)
+        revoke(p)
+        print(p.status)
+        ''')
+        self.assertEqual(out, "revoked\n")
+        last = it.bonds["us"].journal.entries[-1]
+        self.assertEqual((last["kind"], last["by"], last["verified"]), ("revoke", "program", False))
+        self.assertIn("which partner is not verified", last["text"])
 
     def test_revise_keeps_the_shape_and_needs_both_again(self):
         src = BOND + '''

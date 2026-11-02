@@ -18,6 +18,7 @@ class Function(Callable):
     params: list
     body: list
     closure: object
+    source: str = ""   # its exact source text
 
 
 @dataclass(eq=False)
@@ -276,10 +277,12 @@ class Proposal:
     version exists) or revoked (an approval that was withdrawn).
     """
     FIELDS = ("id", "version", "text", "fingerprint", "replaces", "status", "rounds", "bond",
-              "standing", "needs", "objections", "uses", "blocked_by", "ready")
+              "standing", "needs", "objections", "uses", "actions", "blocked_by", "ready",
+              "limit", "expires", "args", "retry", "action")
 
     def __init__(self, bond, entry):
         self.bond = bond
+        self.entry = entry
         self.id = entry["n"]
         self.version = entry["version"]
         self.text = entry["text"]
@@ -330,10 +333,28 @@ class Proposal:
                 blocked.append(n)
         return blocked
 
+    def actions(self):
+        """Each action run under this proposal: started, then succeeded or failed.
+        A start with no recorded end (the program stopped mid-way) is "unknown"."""
+        ends = {e["execution"]: e["state"] for e in self._entries("act_end")}
+        return [{"id": e["n"], "state": ends.get(e["n"], "unknown")} for e in self._entries("act")]
+
+    def counted_uses(self):
+        """Uses that count against the approval. With retry, a failed action does not count;
+        an unknown one always does, because it may have done its work."""
+        retry = bool(self.entry.get("retry"))
+        return sum(1 for a in self.actions() if not (retry and a["state"] == "failed"))
+
+    def expired(self):
+        expires = self.entry.get("expires")
+        return bool(expires) and self.bond.journal.clock()[:len(expires)] > expires
+
     def ready(self):
         """Whether `act` may run under this proposal right now."""
-        return (self.status() == "approved" and not self.blocked_by()
-                and (self.standing or not self._entries("act")))
+        limit = self.entry.get("limit")
+        used = self.counted_uses()
+        return (self.status() == "approved" and not self.blocked_by() and bool(self.entry.get("action"))
+                and not self.expired() and (self.standing or not used) and (limit is None or used < limit))
 
     def get(self, name):
         if name == "status":
@@ -346,6 +367,11 @@ class Proposal:
             return self.objections()
         if name == "uses":
             return len(self._entries("act"))
+        if name == "actions":
+            return self.actions()
+        if name in ("limit", "expires", "args", "retry", "action"):
+            v = self.entry.get(name)
+            return bool(v) if name == "retry" else v
         if name == "blocked_by":
             return self.blocked_by()
         if name == "ready":

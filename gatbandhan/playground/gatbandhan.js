@@ -57,6 +57,7 @@
     const n = src.length;
     const tok = (kind, value, l) => toks.push({ kind, value, line: l });
     while (i < n) {
+      const start = i, before = toks.length;
       const ch = src[i];
       if (ch === "\n") { line++; i++; }
       else if (ch === " " || ch === "\t" || ch === "\r") { i++; }
@@ -117,8 +118,9 @@
       } else {
         throw new GbnSyntaxError(`unexpected character '${ch}'`, line);
       }
+      if (toks.length > before) Object.assign(toks[toks.length - 1], { pos: start, end: i });
     }
-    tok("EOF", null, line);
+    toks.push({ kind: "EOF", value: null, line, pos: n, end: n });
     return toks;
   }
 
@@ -131,11 +133,13 @@
   const COMPARE = new Set(["==", "!=", "<", "<=", ">", ">="]);
 
   function parse(src) {
-    return new Parser(tokenize(src)).program();
+    return new Parser(tokenize(src), src).program();
   }
 
   class Parser {
-    constructor(toks) { this.toks = toks; this.pos = 0; }
+    constructor(toks, src = null) { this.toks = toks; this.pos = 0; this.src = src; }
+    // The exact source text from a token to the last one read: a function's own words.
+    sourceSince(t) { return this.src === null ? "" : this.src.slice(t.pos, this.toks[this.pos - 1].end); }
     get tok() { return this.toks[this.pos]; }
     peek(k = 1) { return this.toks[Math.min(this.pos + k, this.toks.length - 1)]; }
     advance() { return this.toks[this.pos++]; }
@@ -200,7 +204,8 @@
       if (this.isKw(t, "fn") && this.peek().kind === "IDENT") {
         this.advance();
         const name = this.advance().value;
-        return { type: "FnDecl", line, name, params: this.params(), body: this.block() };
+        const params = this.params(), body = this.block();
+        return { type: "FnDecl", line, name, params, body, source: this.sourceSince(t) };
       }
       if (this.isKw(t, "member")) {
         this.advance();
@@ -464,7 +469,8 @@
       }
       if (this.isKw(t, "fn")) {
         this.advance();
-        return { type: "FnLit", line: t.line, params: this.params(), body: this.block() };
+        const params = this.params(), body = this.block();
+        return { type: "FnLit", line: t.line, params, body, source: this.sourceSince(t) };
       }
       this.error("expected an expression");
     }
@@ -521,7 +527,7 @@
     list() { return this.digits().split("").map(Number); }
   }
 
-  class Fn { constructor(name, params, body, closure) { Object.assign(this, { name, params, body, closure }); } }
+  class Fn { constructor(name, params, body, closure, source = "") { Object.assign(this, { name, params, body, closure, source }); } }
   class Builtin { constructor(name, fn) { this.name = name; this.fn = fn; } }
   class Member { constructor(name, params, body, closure, trust) { Object.assign(this, { name, params, body, closure, trust }); } }
   class Coalition {
@@ -601,10 +607,11 @@
   const DEADLOCK_ROUNDS = 3; // disagreed rounds after which an open proposal is flagged for review
 
   const PROPOSAL_FIELDS = ["id", "version", "text", "fingerprint", "replaces", "status", "rounds", "bond",
-    "standing", "needs", "objections", "uses", "blocked_by", "ready"];
+    "standing", "needs", "objections", "uses", "actions", "blocked_by", "ready",
+    "limit", "expires", "args", "retry", "action"];
   class Proposal {
     constructor(bond, entry) {
-      this.bond = bond; this.id = entry.n; this.version = entry.version; this.text = entry.text;
+      this.bond = bond; this.entry = entry; this.id = entry.n; this.version = entry.version; this.text = entry.text;
       this.fingerprint = entry.fingerprint; this.replaces = entry.replaces === undefined ? null : entry.replaces;
       this.standing = !!entry.standing; this.needs = [...(entry.needs || [])];
     }
@@ -631,13 +638,30 @@
       return out;
     }
     blockedBy() { return this.needs.filter(n => new Proposal(this.bond, this.entryOf(n)).status() !== "approved"); }
-    ready() { return this.status() === "approved" && !this.blockedBy().length && (this.standing || !this.entries("act").length); }
+    // Each action run under this proposal: started, then succeeded or failed.
+    // A start with no recorded end (the program stopped mid-way) is "unknown".
+    actions() {
+      const ends = new Map(this.entries("act_end").map(e => [e.execution, e.state]));
+      return this.entries("act").map(e => new Map([["id", e.n], ["state", ends.get(e.n) || "unknown"]]));
+    }
+    // With retry, a failed action does not count; an unknown one always does.
+    countedUses() { const retry = !!this.entry.retry; return this.actions().filter(a => !(retry && a.get("state") === "failed")).length; }
+    expired() { const x = this.entry.expires; return !!x && this.bond.journal.clock().slice(0, x.length) > x; }
+    ready() {
+      const limit = this.entry.limit ?? null, used = this.countedUses();
+      return this.status() === "approved" && !this.blockedBy().length && !!this.entry.action && !this.expired()
+        && (this.standing || !used) && (limit === null || used < limit);
+    }
     get(name) {
       if (name === "status") return this.status();
       if (name === "rounds") return this.rounds().length;
       if (name === "bond") return this.bond.name;
       if (name === "objections") return this.objections();
       if (name === "uses") return this.entries("act").length;
+      if (name === "actions") return this.actions();
+      if (name === "retry") return !!this.entry.retry;
+      if (name === "args") return this.entry.args == null ? null : fromPlain(this.entry.args);
+      if (["limit", "expires", "action"].includes(name)) return this.entry[name] ?? null;
       if (name === "blocked_by") return this.blockedBy();
       if (name === "ready") return this.ready();
       return this[name];
@@ -678,6 +702,12 @@
     if (Array.isArray(v)) return v.map(unseal);
     if (v instanceof Map) return new Map([...v].map(([k, x]) => [k, unseal(x)]));
     return v;
+  }
+  // Plain JSON data (as kept in a bond's memory) back into Gatbandhan values.
+  function fromPlain(v) {
+    if (Array.isArray(v)) return v.map(fromPlain);
+    if (v && typeof v === "object") return new Map(Object.entries(v).map(([k, x]) => [k, fromPlain(x)]));
+    return v === undefined ? null : v;
   }
   const isSealed = v => (Array.isArray(v) || v instanceof Map) && sealedOwner.has(v);
 
@@ -1043,7 +1073,7 @@
         case "ExprStmt": await this.eval(s.expr, env); return;
         case "Let": await this.guardName(s.name, s.line, "rebind"); env.vars.set(s.name, await this.eval(s.value, env)); return;
         case "Assign": return this.assign(s, env);
-        case "FnDecl": await this.guardName(s.name, s.line, "redefine"); env.vars.set(s.name, new Fn(s.name, s.params, s.body, env)); return;
+        case "FnDecl": await this.guardName(s.name, s.line, "redefine"); env.vars.set(s.name, new Fn(s.name, s.params, s.body, env, s.source)); return;
         case "MemberDecl": {
           await this.guardName(s.name, s.line, "redefine");
           let trust = 1;
@@ -1451,7 +1481,7 @@
         }
         case "ListLit": { const out = []; for (const x of e.items) out.push(await this.eval(x, env)); return out; }
         case "MapLit": { const m = new Map(); for (const [k, x] of e.entries) m.set(k, await this.eval(x, env)); return m; }
-        case "FnLit": return new Fn("fn", e.params, e.body, env);
+        case "FnLit": return new Fn("fn", e.params, e.body, env, e.source);
         case "Unary": {
           const v = await this.eval(e.operand, env);
           if (e.op === "not") return !truthy(v);
@@ -1683,30 +1713,65 @@
     def("history", ([c]) => { if (!(c instanceof Coalition)) err("history(c) needs a coalition"); return [...c.history]; });
     def("vows", ([b]) => { if (!(b instanceof Bond)) err("vows(b) needs a bond"); return b.get("vows"); });
     def("memory", ([b]) => { if (!(b instanceof Bond)) err("memory(b) needs a bond"); return b.get("memory"); });
-    const addProposal = async (bond, text, version, replaces, standing = false, needs = []) => {
+    const OPTION_KEYS = ["standing", "needs", "action", "args", "limit", "expires", "retry"];
+    const addProposal = async (bond, text, version, replaces, opts) => {
       const n = bond.journal.entries.length + 1;
       const material = { bond: bond.get("id"), n, text, version, replaces };
-      if (standing) material.standing = true;
-      if (needs.length) material.needs = needs.map(p => p.fingerprint);
+      const stored = {};
+      for (const k of OPTION_KEYS) {
+        const v = opts[k];
+        if (v === undefined || v === null || v === false || (Array.isArray(v) && !v.length)) continue;
+        if (k === "needs") { material.needs = v.map(p => p.fingerprint); stored.needs = v.map(p => p.id); }
+        else material[k] = stored[k] = v;
+      }
       const fp = await sha256(canonical(material));
-      return new Proposal(bond, await bond.journal.append("proposal", {
-        text, version, replaces, standing: standing ? true : null, needs: needs.length ? needs.map(p => p.id) : null, fingerprint: fp,
-      }));
+      return new Proposal(bond, await bond.journal.append("proposal", Object.assign({ text, version, replaces, fingerprint: fp }, stored)));
     };
-    // Read {standing: bool, needs: [proposals]} for propose and revise.
-    const options = (bond, opts, fn) => {
-      if (opts === undefined || opts === null) return [false, []];
-      if (!(opts instanceof Map) || [...opts.keys()].some(k => k !== "standing" && k !== "needs")) err(`${fn}: options are a map with 'standing' and 'needs'`);
-      const standing = opts.has("standing") ? opts.get("standing") : false;
+    // Arguments are written into the bond's memory, so they must be plain data.
+    const plain = (v, bad) => {
+      if (v === null || v === undefined) return null;
+      if (["boolean", "string", "number"].includes(typeof v)) return v;
+      if (Array.isArray(v)) return v.map(x => plain(x, bad));
+      if (v instanceof Map && [...v.keys()].every(k => typeof k === "string")) {
+        const o = {}; for (const [k, x] of v) o[k] = plain(x, bad); return o;
+      }
+      bad("'args' can hold only text, numbers, true/false, none, lists and maps");
+    };
+    // Read the options of propose and revise (spec section 7.7).
+    const options = async (bond, opts, fn) => {
+      if (opts === undefined || opts === null) return {};
+      if (!(opts instanceof Map) || [...opts.keys()].some(k => !OPTION_KEYS.includes(k))) err(`${fn}: options are a map with any of: ${OPTION_KEYS.join(", ")}`);
+      const bad = msg => err(`${fn}: ${msg}`);
+      const out = {};
+      for (const k of ["standing", "retry"]) {
+        if (opts.has(k)) { if (typeof opts.get(k) !== "boolean") bad(`'${k}' must be true or false`); out[k] = opts.get(k); }
+      }
       const needs = opts.get("needs") || [];
-      if (typeof standing !== "boolean") err(`${fn}: 'standing' must be true or false`);
-      if (!Array.isArray(needs) || !needs.every(p => p instanceof Proposal && p.bond === bond)) err(`${fn}: 'needs' must be a list of proposals of the same bond`);
-      return [standing, [...needs]];
+      if (!Array.isArray(needs) || !needs.every(p => p instanceof Proposal && p.bond === bond)) bad("'needs' must be a list of proposals of the same bond");
+      out.needs = [...needs];
+      if (opts.get("action") !== undefined && opts.get("action") !== null) {
+        const a = opts.get("action");
+        if (!(a instanceof Fn) || !a.source) bad("'action' must be a function written in the program, like fn() { ... }");
+        out.action = await sha256(a.source);
+      }
+      if (opts.has("args")) {
+        if (!Array.isArray(opts.get("args")) || !("action" in out)) bad("'args' must be a list, and needs an 'action'");
+        out.args = plain(unseal(opts.get("args")), bad);
+      }
+      if (opts.has("limit")) {
+        const lim = opts.get("limit");
+        if (!isInt(lim) || lim < 1) bad("'limit' must be a whole number of 1 or more");
+        out.limit = lim;
+      }
+      if (opts.has("expires")) {
+        if (typeof opts.get("expires") !== "string" || !opts.get("expires")) bad("'expires' must be a date like \"2026-12-31\"");
+        out.expires = opts.get("expires");
+      }
+      return out;
     };
     def("propose", async (args) => {
       if (![2, 3].includes(args.length) || !(args[0] instanceof Bond) || typeof args[1] !== "string") err("propose(bond, text, options?) needs a bond and a text");
-      const [standing, needs] = options(args[0], args[2], "propose");
-      return addProposal(args[0], args[1], 1, null, standing, needs);
+      return addProposal(args[0], args[1], 1, null, await options(args[0], args[2], "propose"));
     });
     def("revise", async (args) => {
       if (![2, 3].includes(args.length) || !(args[0] instanceof Proposal) || typeof args[1] !== "string") err("revise(proposal, text, options?) needs a proposal and a text");
@@ -1716,41 +1781,71 @@
       if (!["pending", "disagreed", "deadlocked"].includes(status)) {
         err(`proposal ${p.id} is already ${status}; a decided proposal is not revised, make a new one with propose()`);
       }
-      const [standing, needs] = args.length === 3 ? options(p.bond, args[2], "revise")
-        : [p.standing, p.needs.map(n => new Proposal(p.bond, p.entryOf(n)))];
-      return addProposal(p.bond, args[1], p.version + 1, p.id, standing, needs);
+      let opts;
+      if (args.length === 3) opts = await options(p.bond, args[2], "revise");
+      else {
+        opts = {};
+        for (const k of OPTION_KEYS) if (k !== "needs") opts[k] = p.entry[k];
+        opts.needs = p.needs.map(n => new Proposal(p.bond, p.entryOf(n)));
+      }
+      return addProposal(p.bond, args[1], p.version + 1, p.id, opts);
     });
-    // Run work under an approved proposal. Anything else is refused and remembered.
+    // Run the exact approved action under an approved proposal. Anything else is refused.
     def("act", async (args, line) => {
       if (args.length !== 2 || !(args[0] instanceof Proposal) || !(args[1] instanceof Fn || args[1] instanceof Builtin || args[1] instanceof Member)) {
-        err("act(proposal, fn() { ... }) needs a proposal and a function");
+        err("act(proposal, fn() { ... }) needs a proposal and its approved action");
       }
       const [p, work] = args;
       const bond = p.bond;
       const why = "Only work both partners approved can run under the bond";
+      const refuse = (what, reason = why) => it.refuse(bond, `act on proposal ${p.id}: ${what}`, line, reason);
       const status = p.status();
-      if (status !== "approved") await it.refuse(bond, `act on proposal ${p.id}: it is ${status}, not approved by both`, line, why);
+      if (status !== "approved") await refuse(`it is ${status}, not approved by both`);
       const blocked = p.blockedBy();
       if (blocked.length) {
         const need = new Proposal(bond, p.entryOf(blocked[0]));
-        await it.refuse(bond, `act on proposal ${p.id}: it needs proposal ${need.id}, which is ${need.status()}`, line, why);
+        await refuse(`it needs proposal ${need.id}, which is ${need.status()}`);
       }
-      const uses = p.entries("act").length;
-      if (!p.standing && uses) {
-        await it.refuse(bond, `act on proposal ${p.id} again: it allowed one action and it was used`, line,
+      if (!p.entry.action) {
+        await refuse("it names no action", "A proposal must name its action (options: {action: fn() { ... }}) "
+          + "so that only what was approved can run");
+      }
+      if (!(work instanceof Fn) || !work.source || await sha256(work.source) !== p.entry.action) {
+        await refuse("this is not the action both partners approved",
+          "What was approved is exactly what runs; a changed action needs a new proposal");
+      }
+      if (p.expired()) await refuse(`its approval expired on ${p.entry.expires}`, "An expired approval is never stretched; propose again");
+      const counted = p.countedUses();
+      const limit = p.entry.limit ?? null;
+      if (limit !== null && counted >= limit) await refuse(`its limit of ${limit} uses is reached`, "Propose again to allow more");
+      if (!p.standing && counted) {
+        await refuse("it allowed one action and it was used",
           "A one-time approval is never reused; propose again, or approve a standing permission");
       }
-      // The use is written down before the work runs, so a crash cannot hide it.
-      await bond.journal.append("act", { by: "program", proposal: p.fingerprint, proposal_id: p.id, use: uses + 1, text: `acted on proposal ${p.id}: ${p.text}` });
-      return it.call(work, [], line);
+      // The start is written down before the work runs, so a crash cannot hide it.
+      const start = await bond.journal.append("act", { by: "program", proposal: p.fingerprint, proposal_id: p.id,
+        use: p.actions().length + 1, state: "started", text: `started the action of proposal ${p.id}: ${p.text}` });
+      let result;
+      try {
+        result = await it.call(work, p.entry.args ? fromPlain(p.entry.args) : [], line);
+      } catch (e) {
+        await bond.journal.append("act_end", { by: "program", proposal: p.fingerprint, execution: start.n,
+          state: "failed", error: String(e && e.message || e), text: `the action of proposal ${p.id} failed` });
+        throw e;
+      }
+      await bond.journal.append("act_end", { by: "program", proposal: p.fingerprint, execution: start.n,
+        state: "succeeded", text: `the action of proposal ${p.id} succeeded` });
+      return result;
     });
-    // Withdraw an approval. Consent needs both partners, so either one may withdraw it.
+    // Withdraw an approval. Partners are not identified yet, so this is recorded as a
+    // program-level revocation, not as a verified partner's withdrawal.
     def("revoke", async (args) => {
       if (args.length !== 1 || !(args[0] instanceof Proposal)) err("revoke(proposal) needs a proposal");
       const p = args[0];
       const status = p.status();
       if (status !== "approved") err(`proposal ${p.id} is ${status}; only an approved proposal can be revoked`);
-      await p.bond.journal.append("revoke", { by: "program", proposal: p.fingerprint, proposal_id: p.id, text: `revoked proposal ${p.id}: ${p.text}` });
+      await p.bond.journal.append("revoke", { by: "program", verified: false, proposal: p.fingerprint, proposal_id: p.id,
+        text: `the program revoked proposal ${p.id} (which partner is not verified): ${p.text}` });
       return null;
     });
     const listProposals = (b, fn, openOnly) => {

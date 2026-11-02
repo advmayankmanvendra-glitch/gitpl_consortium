@@ -109,6 +109,20 @@ function check(name, ok, detail) {
   check("human objection through ask", out3[0] === '{M: {reason: "It is not ready", condition: "More tests"}}' &&
     asked.some(q => q.startsWith("Why not?")) && asked.some(q => q.startsWith("What would change")), out3.join("|"));
 
+  // a failed action is written down; with retry it does not use up the approval
+  for (const [retry, ready] of [["true", "true"], ["false", "false"]]) {
+    const store4 = new G.MemoryStore();
+    const kept = `member s(q) { return "yes" } bond us { human: "M" ai: s keep: "r" } let w = fn() { error("disk full") }`;
+    const first4 = await runProgram(kept + ` script_human(["yes"]) let p = propose(us, "copy", {action: w, retry: ${retry}}) us(p) act(p, w)`);
+    const it4 = new G.Interpreter({ print: () => {}, store: store4 });
+    try { await it4.run(kept + ` script_human(["yes"]) let p = propose(us, "copy", {action: w, retry: ${retry}}) us(p) act(p, w)`); } catch (e) { /* expected */ }
+    const out4 = [];
+    const again = new G.Interpreter({ print: l => out4.push(l), store: store4 });
+    await again.run(kept + " let p = proposals(us)[0] print(p.actions, p.ready)");
+    check(`failed action, retry ${retry}`, first4.includes("disk full") &&
+      out4[0] === `[{id: 4, state: "failed"}] ${ready}`, out4.join("|"));
+  }
+
   console.log(`${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

@@ -128,7 +128,7 @@ class Interpreter:
             self.assign(s, env)
         elif t is ast.FnDecl:
             self.guard_name(s.name, s.line, "redefine")
-            env.vars[s.name] = Function(s.name, s.params, s.body, env)
+            env.vars[s.name] = Function(s.name, s.params, s.body, env, s.source)
         elif t is ast.MemberDecl:
             self.guard_name(s.name, s.line, "redefine")
             trust = 1.0
@@ -578,7 +578,7 @@ class Interpreter:
         if t is ast.MapLit:
             return {k: self.eval(v, env) for k, v in e.entries}
         if t is ast.FnLit:
-            return Function("fn", e.params, e.body, env)
+            return Function("fn", e.params, e.body, env, e.source)
         if t is ast.Unary:
             v = self.eval(e.operand, env)
             if e.op == "not":
