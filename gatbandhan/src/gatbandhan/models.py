@@ -84,13 +84,27 @@ class Human:
         return raw if raw.strip() else None
 
     def answer(self, name, question):
-        """Return (answer, feeling); answer is None when the human said nothing."""
+        """Return (answer, feeling, objection); answer is None when the human said nothing.
+
+        After a no, the human is asked why and what would change their mind; both
+        can be skipped. The objection is None unless a reason was given.
+        """
+        from .values import Objection, yes_no
         reply = self.line(f"{name}, {question}\n> ")
         if isinstance(reply, dict):
-            return reply.get("answer"), reply.get("feeling")
+            reason = reply.get("reason")
+            objection = Objection(reason.strip(), reply.get("condition")) \
+                if isinstance(reason, str) and reason.strip() else None
+            return reply.get("answer"), reply.get("feeling"), objection
         if reply is None:
-            return None, None
+            return None, None, None
         if self.scripted is not None:
-            return reply, None
+            return reply, None, None
+        objection = None
+        if yes_no(reply) == 0:
+            reason = self.line("Why not? (Enter to skip)\n> ")
+            if reason:
+                condition = self.line("What would change your mind? (Enter to skip)\n> ")
+                objection = Objection(reason.strip(), condition.strip() if condition else None)
         feeling = self.line("How do you feel about it? (Enter to skip)\n> ")
-        return reply, feeling
+        return reply, feeling, objection

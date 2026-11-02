@@ -277,7 +277,7 @@
  },
  {
   "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, 3))",
-  "output": "GbnRuntimeError: line 1: propose(bond, text) needs a bond and a text\n"
+  "output": "GbnRuntimeError: line 1: propose(bond, text, options?) needs a bond and a text\n"
  },
  {
   "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") print(p.colour)",
@@ -286,5 +286,105 @@
  {
   "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let p = propose(us, \"a\") us(p) print(us.id, p.status) revise(p, \"b\")",
   "output": "ce83fc123efe8a76c247425b465c323bca849ae38cc4f208fb5dd15b1b6930da approved\nGbnRuntimeError: line 1: proposal 2 is already approved; a decided proposal is not revised, make a new one with propose()\n"
+ },
+ {
+  "source": "member s(q) { if contains(q, \"migrate\") { return objection(\"The backup is not tested\", \"Test a restore first\") with feeling \"worried\" } return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\", \"yes\", \"yes\", \"yes\", \"yes\", {answer: \"no\", reason: \"Too early\", condition: \"After the demo\"}]) let rt = fn() { print(\"running tests\") } let wd = fn() { print(\"writing\") } let tests = propose(us, \"Run the test suite\", {standing: true, action: rt}) let docs = propose(us, \"Write the guide\", {action: wd}) let migrate = propose(us, \"migrate the database\") let release = propose(us, \"Release version 2\", {needs: [migrate], action: wd}) print(tests, tests.fingerprint, release.fingerprint, release.needs) print(us(tests).outcome, us(docs).outcome) for i in range(3) { let v = us(migrate) print(v, v.gate, v.objections) } print(migrate.status, migrate.objections) print(us(release).outcome, release.status, release.objections, release.blocked_by, release.ready) act(tests, rt) act(tests, rt) act(docs, wd) print(tests.uses, docs.uses, docs.ready, tests.ready) for p in unresolved(us) { print(\"open:\", p) } revoke(tests) print(tests.status, tests.ready) for e in memory(us) { print(e.n, e.kind, e.text, e.objections) } act(release, wd)",
+  "output": "<proposal 2 v1 standing pending: \"Run the test suite\"> e511264a290facb1adbac8719d659d37124bbede39483d3cd987877b4863808b 6d540698308f0080f8a01ba0bfbfe89d3a8bb139f177f6cbace00aaf6b16467d [4]\napproved approved\n<verdict us: disagreed (the partners disagree)> 1 ∧ 0 = 0 {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n<verdict us: disagreed (the partners disagree)> 1 ∧ 0 = 0 {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n<verdict us: disagreed (the partners disagree)> 1 ∧ 0 = 0 {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\ndeadlocked [{round: 1, by: \"s\", reason: \"The backup is not tested\", condition: \"Test a restore first\"}, {round: 2, by: \"s\", reason: \"The backup is not tested\", condition: \"Test a restore first\"}, {round: 3, by: \"s\", reason: \"The backup is not tested\", condition: \"Test a restore first\"}]\ndisagreed disagreed [{round: 1, by: \"Asha\", reason: \"Too early\", condition: \"After the demo\"}] [4] false\nrunning tests\nrunning tests\nwriting\n2 1 false true\nopen: <proposal 4 v1 deadlocked: \"migrate the database\">\nopen: <proposal 5 v1 disagreed: \"Release version 2\">\nrevoked false\n1 bond Asha and s formed the bond 'us' none\n2 proposal Run the test suite none\n3 proposal Write the guide none\n4 proposal migrate the database none\n5 proposal Release version 2 none\n6 decision Run the test suite (both approve) none\n7 decision Write the guide (both approve) none\n8 decision migrate the database (the partners disagree) {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n9 decision migrate the database (the partners disagree) {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n10 decision migrate the database (the partners disagree) {s: {reason: \"The backup is not tested\", condition: \"Test a restore first\"}}\n11 decision Release version 2 (the partners disagree) {Asha: {reason: \"Too early\", condition: \"After the demo\"}}\n12 act started the action of proposal 2: Run the test suite none\n13 act_end the action of proposal 2 succeeded none\n14 act started the action of proposal 2: Run the test suite none\n15 act_end the action of proposal 2 succeeded none\n16 act started the action of proposal 3: Write the guide none\n17 act_end the action of proposal 3 succeeded none\n18 revoke the program revoked proposal 2 (which partner is not verified): Run the test suite none\nBondError: line 1: refused: act on proposal 5: it is disagreed, not approved by both. Only work both partners approved can run under the bond\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let w = fn() { print(\"once\") } let p = propose(us, \"a\", {action: w}) us(p) act(p, w) act(p, w)",
+  "output": "once\nBondError: line 1: refused: act on proposal 2: it allowed one action and it was used. A one-time approval is never reused; propose again, or approve a standing permission\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") act(p, fn() { print(\"x\") })",
+  "output": "BondError: line 1: refused: act on proposal 2: it is pending, not approved by both. Only work both partners approved can run under the bond\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } let p = propose(us, \"a\") revoke(p)",
+  "output": "GbnRuntimeError: line 1: proposal 2 is pending; only an approved proposal can be revoked\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, \"a\", {colour: \"red\"}))",
+  "output": "GbnRuntimeError: line 1: propose: options are a map with any of: standing, needs, action, args, limit, expires, retry\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, \"a\", {needs: [\"b\"]}))",
+  "output": "GbnRuntimeError: line 1: propose: 'needs' must be a list of proposals of the same bond\n"
+ },
+ {
+  "source": "print(objection(\"\"))",
+  "output": "GbnRuntimeError: line 1: objection(reason, condition?) needs a reason\n"
+ },
+ {
+  "source": "let o = objection(\"No time\", 3) print(o.reason, o.condition, o == objection(\"No time\", 3), o.size)",
+  "output": "GbnRuntimeError: line 1: an objection has no field 'size'\n"
+ },
+ {
+  "source": "script(\"m\", [\"\\{\\\"answer\\\": \\\"no\\\", \\\"reason\\\": \\\"Unsafe\\\", \\\"condition\\\": \\\"Add a check\\\"\\}\", {answer: \"yes\", reason: \"fine\"}]) bond us { human: \"Asha\" ai: \"m\" } script_human([\"yes\", \"yes\"]) let a = us(\"x?\") let b = us(\"y?\") print(a.outcome, a.objections, b.outcome, b.objections)",
+  "output": "disagreed {m: {reason: \"Unsafe\", condition: \"Add a check\"}} approved {}\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"no\", \"yes\"]) let five = fn() { return 5 } let p = propose(us, \"a\", {standing: true, action: five}) us(p) let q = revise(p, \"b\") print(q, q.standing) print(us(q).outcome) print(act(q, five)) print(q.actions) act(q, fn() { return 7 })",
+  "output": "<proposal 4 v2 standing pending: \"b\"> true\napproved\n5\n[{id: 6, state: \"succeeded\"}]\nBondError: line 1: refused: act on proposal 4: this is not the action both partners approved. What was approved is exactly what runs; a changed action needs a new proposal\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let w = fn() { print(\"tests\") } let p = propose(us, \"a\", {standing: true, action: w}) us(p) act(p, w) act(p, fn() { print(\"tests\")  })",
+  "output": "tests\nBondError: line 1: refused: act on proposal 2: this is not the action both partners approved. What was approved is exactly what runs; a changed action needs a new proposal\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let p = propose(us, \"a\") us(p) act(p, fn() { print(\"x\") })",
+  "output": "BondError: line 1: refused: act on proposal 2: it names no action. A proposal must name its action (options: {action: fn() { ... }}) so that only what was approved can run\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let d = fn(where, n) { print(\"to\", where, n) return n + 1 } let p = propose(us, \"deploy\", {action: d, args: [\"staging\", 2], standing: true}) us(p) print(act(p, d), p.args, p.limit, p.expires, p.retry, len(p.action)) let q = propose(us, \"deploy\", {action: d, args: [\"prod\", 2]}) print(p.fingerprint == q.fingerprint)",
+  "output": "to staging 2\n3 [\"staging\", 2] none none false 64\nfalse\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let w = fn() { print(\"ran\") } let p = propose(us, \"a\", {standing: true, action: w, limit: 2}) us(p) act(p, w) act(p, w) print(p.uses, p.ready) act(p, w)",
+  "output": "ran\nran\n2 false\nBondError: line 1: refused: act on proposal 2: its limit of 2 uses is reached. Propose again to allow more\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let w = fn() { print(\"ran\") } let p = propose(us, \"a\", {standing: true, action: w, expires: \"2026-12-31\"}) us(p) print(p.ready) act(p, w)",
+  "output": "false\nBondError: line 1: refused: act on proposal 2: its approval expired on 2026-12-31. An expired approval is never stretched; propose again\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\", \"yes\"]) let w = fn() { error(\"disk full\") } let p = propose(us, \"a\", {action: w, retry: true}) us(p) let e = memory(us) act(p, w)",
+  "output": "GbnRuntimeError: line 1: disk full\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let w = fn() { error(\"disk full\") } let p = propose(us, \"a\", {action: w}) us(p) act(p, w)",
+  "output": "GbnRuntimeError: line 1: disk full\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, \"a\", {action: print}))",
+  "output": "GbnRuntimeError: line 1: propose: 'action' must be a function written in the program, like fn() { ... }\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, \"a\", {args: [1]}))",
+  "output": "GbnRuntimeError: line 1: propose: 'args' must be a list, and needs an 'action'\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, \"a\", {limit: 0}))",
+  "output": "GbnRuntimeError: line 1: propose: 'limit' must be a whole number of 1 or more\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, \"a\", {expires: 5}))",
+  "output": "GbnRuntimeError: line 1: propose: 'expires' must be a date like \"2026-12-31\"\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } print(propose(us, \"a\", {retry: \"yes\"}))",
+  "output": "GbnRuntimeError: line 1: propose: 'retry' must be true or false\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) let w = fn() { print(1) } let p = propose(us, \"a\", {standing: true, action: w}) us(p) revoke(p) let e = memory(us)[len(memory(us)) - 1] print(e.kind, e.by, e.verified, e.text, p.status)",
+  "output": "revoke program false the program revoked proposal 2 (which partner is not verified): a revoked\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"no\", \"yes\"]) let w = fn() { print(\"built\") } let p = propose(us, \"a\", {standing: true, action: w, limit: 3, retry: true}) us(p) let q = revise(p, \"b\") print(q.standing, q.limit, q.retry, q.action == p.action, us(q).outcome) act(q, w)",
+  "output": "true 3 true true approved\nbuilt\n"
+ },
+ {
+  "source": "member s(q) { return \"yes\" } bond us { human: \"Asha\" ai: s } script_human([\"yes\"]) fn greet(n) { print(\"नमस्ते 🙏\", n) } let p = propose(us, \"a\", {action: greet, args: [\"Asha\"]}) us(p) print(p.action) act(p, greet)",
+  "output": "5f96d0de4ea8971ff55a706798dd47fa6be4b914be1c1842734b6d028da64145\nनमस्ते 🙏 Asha\n"
  }
 ]

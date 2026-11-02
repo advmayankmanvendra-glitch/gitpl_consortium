@@ -17,6 +17,7 @@ EXAMPLES = [
     ("vows", "Vows can't be overwritten", os.path.join(LANG_EXAMPLES, "refused_overwrite.gbn")),
     ("bits", "Bits and gates", os.path.join(LANG_EXAMPLES, "bits.gbn")),
     ("proposals", "Proposals that wait", os.path.join(LANG_EXAMPLES, "proposals.gbn")),
+    ("continuity", "When we disagree", os.path.join(LANG_EXAMPLES, "continuity.gbn")),
     ("remembers", "A bond that remembers", os.path.join(HERE, "examples", "remembers.gbn")),
     ("coalition", "A coalition votes", os.path.join(LANG_EXAMPLES, "coalition.gbn")),
     ("nested", "Coalitions of models", os.path.join(LANG_EXAMPLES, "nested.gbn")),

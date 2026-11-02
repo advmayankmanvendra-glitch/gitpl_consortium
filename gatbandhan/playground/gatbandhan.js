@@ -57,6 +57,7 @@
     const n = src.length;
     const tok = (kind, value, l) => toks.push({ kind, value, line: l });
     while (i < n) {
+      const start = i, before = toks.length;
       const ch = src[i];
       if (ch === "\n") { line++; i++; }
       else if (ch === " " || ch === "\t" || ch === "\r") { i++; }
@@ -117,8 +118,9 @@
       } else {
         throw new GbnSyntaxError(`unexpected character '${ch}'`, line);
       }
+      if (toks.length > before) Object.assign(toks[toks.length - 1], { pos: start, end: i });
     }
-    tok("EOF", null, line);
+    toks.push({ kind: "EOF", value: null, line, pos: n, end: n });
     return toks;
   }
 
@@ -131,11 +133,13 @@
   const COMPARE = new Set(["==", "!=", "<", "<=", ">", ">="]);
 
   function parse(src) {
-    return new Parser(tokenize(src)).program();
+    return new Parser(tokenize(src), src).program();
   }
 
   class Parser {
-    constructor(toks) { this.toks = toks; this.pos = 0; }
+    constructor(toks, src = null) { this.toks = toks; this.pos = 0; this.src = src; }
+    // The exact source text from a token to the last one read: a function's own words.
+    sourceSince(t) { return this.src === null ? "" : this.src.slice(t.pos, this.toks[this.pos - 1].end); }
     get tok() { return this.toks[this.pos]; }
     peek(k = 1) { return this.toks[Math.min(this.pos + k, this.toks.length - 1)]; }
     advance() { return this.toks[this.pos++]; }
@@ -200,7 +204,8 @@
       if (this.isKw(t, "fn") && this.peek().kind === "IDENT") {
         this.advance();
         const name = this.advance().value;
-        return { type: "FnDecl", line, name, params: this.params(), body: this.block() };
+        const params = this.params(), body = this.block();
+        return { type: "FnDecl", line, name, params, body, source: this.sourceSince(t) };
       }
       if (this.isKw(t, "member")) {
         this.advance();
@@ -464,7 +469,8 @@
       }
       if (this.isKw(t, "fn")) {
         this.advance();
-        return { type: "FnLit", line: t.line, params: this.params(), body: this.block() };
+        const params = this.params(), body = this.block();
+        return { type: "FnLit", line: t.line, params, body, source: this.sourceSince(t) };
       }
       this.error("expected an expression");
     }
@@ -521,7 +527,7 @@
     list() { return this.digits().split("").map(Number); }
   }
 
-  class Fn { constructor(name, params, body, closure) { Object.assign(this, { name, params, body, closure }); } }
+  class Fn { constructor(name, params, body, closure, source = "") { Object.assign(this, { name, params, body, closure, source }); } }
   class Builtin { constructor(name, fn) { this.name = name; this.fn = fn; } }
   class Member { constructor(name, params, body, closure, trust) { Object.assign(this, { name, params, body, closure, trust }); } }
   class Coalition {
@@ -529,14 +535,21 @@
   }
 
   const VERDICT_FIELDS = ["agreed", "decision", "reason", "votes", "abstained", "dissent", "tally", "margin",
-    "tiebreak", "coalition", "feelings", "question", "bits", "signal", "gate", "rule", "outcome", "approved", "proposal"];
+    "tiebreak", "coalition", "feelings", "question", "bits", "signal", "gate", "rule", "outcome", "approved", "proposal", "objections"];
   const MATCH_ARMS = ["approved", "rejected", "disagreed", "silent", "agreed", "split"];
   const YES_WORDS = new Set(["yes", "y", "yeah", "yep", "haan", "haa", "ha", "ji", "ok", "okay", "sure",
     "agree", "agreed", "approve", "approved", "true"]);
   const NO_WORDS = new Set(["no", "n", "nope", "nahi", "nahin", "na", "disagree", "reject", "rejected", "never", "false"]);
 
   // 1 for a yes, 0 for a no, null for silence or an open answer (like "tea").
+  // The answer in a reply map; a no that gives a "reason" becomes an Objection.
+  function objectionFrom(reply) {
+    const answer = reply.get("answer") ?? null, reason = reply.get("reason");
+    if (typeof reason === "string" && reason.trim() && yesNo(answer) === 0) return new Objection(reason.trim(), reply.get("condition") ?? null);
+    return answer;
+  }
   function yesNo(answer) {
+    if (answer instanceof Objection) return 0;
     if (typeof answer === "boolean") return answer ? 1 : 0;
     if (typeof answer === "string") {
       const word = answer.trim().toLowerCase().replace(/[.!]+$/, "");
@@ -548,7 +561,7 @@
 
   class Verdict {
     constructor(o) {
-      Object.assign(this, { tiebreak: false, feelings: new Map(), question: null, rule: "", partners: null, outcome: "", marks: null, proposal: null }, o);
+      Object.assign(this, { tiebreak: false, feelings: new Map(), question: null, rule: "", partners: null, outcome: "", marks: null, proposal: null, objections: new Map() }, o);
     }
     // True only for a real yes: a bond's approval, or a coalition's agreement.
     get approved() { return this.partners ? this.outcome === "approved" : this.agreed; }
@@ -588,23 +601,69 @@
 
   // A proposal the bond decides on. Its fingerprint never changes; a revision is a new
   // proposal. Its status is read from the bond's memory, so it survives between runs.
-  const PROPOSAL_FIELDS = ["id", "version", "text", "fingerprint", "replaces", "status", "rounds", "bond"];
+  // A "no" that says why, and optionally what would change it.
+  class Objection { constructor(reason, condition = null) { this.reason = reason; this.condition = condition; } get(n) { return this[n]; } }
+  const OBJECTION_FIELDS = ["reason", "condition"];
+  const DEADLOCK_ROUNDS = 3; // disagreed rounds after which an open proposal is flagged for review
+
+  const PROPOSAL_FIELDS = ["id", "version", "text", "fingerprint", "replaces", "status", "rounds", "bond",
+    "standing", "needs", "objections", "uses", "actions", "blocked_by", "ready",
+    "limit", "expires", "args", "retry", "action"];
   class Proposal {
     constructor(bond, entry) {
-      this.bond = bond; this.id = entry.n; this.version = entry.version; this.text = entry.text;
+      this.bond = bond; this.entry = entry; this.id = entry.n; this.version = entry.version; this.text = entry.text;
       this.fingerprint = entry.fingerprint; this.replaces = entry.replaces === undefined ? null : entry.replaces;
+      this.standing = !!entry.standing; this.needs = [...(entry.needs || [])];
     }
-    rounds() { return this.bond.journal.entries.filter(e => e.kind === "decision" && e.proposal === this.fingerprint); }
+    entries(kind) { return this.bond.journal.entries.filter(e => e.kind === kind && e.proposal === this.fingerprint); }
+    rounds() { return this.entries("decision"); }
+    entryOf(n) { return this.bond.journal.entries.find(e => e.n === n); }
     status() {
+      if (this.entries("revoke").length) return "revoked";
       const outcomes = this.rounds().map(e => e.outcome);
       for (const final of ["approved", "rejected"]) if (outcomes.includes(final)) return final;
       if (this.bond.journal.entries.some(e => e.kind === "proposal" && e.replaces === this.id)) return "replaced";
-      return outcomes.length && outcomes[outcomes.length - 1] === "disagreed" ? "disagreed" : "pending";
+      if (outcomes.length && outcomes[outcomes.length - 1] === "disagreed") {
+        return outcomes.filter(o => o === "disagreed").length >= DEADLOCK_ROUNDS ? "deadlocked" : "disagreed";
+      }
+      return "pending";
+    }
+    objections() {
+      const out = [];
+      this.rounds().forEach((e, i) => {
+        for (const [who, o] of Object.entries(e.objections || {})) {
+          out.push(new Map([["round", i + 1], ["by", who], ["reason", o.reason ?? null], ["condition", o.condition ?? null]]));
+        }
+      });
+      return out;
+    }
+    blockedBy() { return this.needs.filter(n => new Proposal(this.bond, this.entryOf(n)).status() !== "approved"); }
+    // Each action run under this proposal: started, then succeeded or failed.
+    // A start with no recorded end (the program stopped mid-way) is "unknown".
+    actions() {
+      const ends = new Map(this.entries("act_end").map(e => [e.execution, e.state]));
+      return this.entries("act").map(e => new Map([["id", e.n], ["state", ends.get(e.n) || "unknown"]]));
+    }
+    // With retry, a failed action does not count; an unknown one always does.
+    countedUses() { const retry = !!this.entry.retry; return this.actions().filter(a => !(retry && a.get("state") === "failed")).length; }
+    expired() { const x = this.entry.expires; return !!x && this.bond.journal.clock().slice(0, x.length) > x; }
+    ready() {
+      const limit = this.entry.limit ?? null, used = this.countedUses();
+      return this.status() === "approved" && !this.blockedBy().length && !!this.entry.action && !this.expired()
+        && (this.standing || !used) && (limit === null || used < limit);
     }
     get(name) {
       if (name === "status") return this.status();
       if (name === "rounds") return this.rounds().length;
       if (name === "bond") return this.bond.name;
+      if (name === "objections") return this.objections();
+      if (name === "uses") return this.entries("act").length;
+      if (name === "actions") return this.actions();
+      if (name === "retry") return !!this.entry.retry;
+      if (name === "args") return this.entry.args == null ? null : fromPlain(this.entry.args);
+      if (["limit", "expires", "action"].includes(name)) return this.entry[name] ?? null;
+      if (name === "blocked_by") return this.blockedBy();
+      if (name === "ready") return this.ready();
       return this[name];
     }
   }
@@ -644,6 +703,12 @@
     if (v instanceof Map) return new Map([...v].map(([k, x]) => [k, unseal(x)]));
     return v;
   }
+  // Plain JSON data (as kept in a bond's memory) back into Gatbandhan values.
+  function fromPlain(v) {
+    if (Array.isArray(v)) return v.map(fromPlain);
+    if (v && typeof v === "object") return new Map(Object.entries(v).map(([k, x]) => [k, fromPlain(x)]));
+    return v === undefined ? null : v;
+  }
   const isSealed = v => (Array.isArray(v) || v instanceof Map) && sealedOwner.has(v);
 
   const isNum = v => typeof v === "number";
@@ -662,6 +727,7 @@
     if (v instanceof Bond) return "bond";
     if (v instanceof Verdict) return "verdict";
     if (v instanceof Proposal) return "proposal";
+    if (v instanceof Objection) return "objection";
     if (v instanceof Fn || v instanceof Builtin) return "fn";
     return typeof v;
   }
@@ -684,7 +750,8 @@
     if (v instanceof Map) {
       return "{" + [...v].map(([k, x]) => `${typeof k === "string" && ident.test(k) ? k : show(k, true)}: ${show(x, true)}`).join(", ") + "}";
     }
-    if (v instanceof Proposal) return `<proposal ${v.id} v${v.version} ${v.status()}: ${show(v.text, true)}>`;
+    if (v instanceof Proposal) return `<proposal ${v.id} v${v.version}${v.standing ? " standing" : ""} ${v.status()}: ${show(v.text, true)}>`;
+    if (v instanceof Objection) return `<objection ${show(v.reason, true)}${v.condition !== null ? " until " + show(v.condition, true) : ""}>`;
     if (v instanceof Verdict) {
       if (v.outcome === "approved" || v.outcome === "rejected") return `<verdict ${v.coalition}: ${v.outcome} ${show(v.decision, true)} (${v.reason})>`;
       if (v.outcome) return `<verdict ${v.coalition}: ${v.outcome} (${v.reason})>`;
@@ -711,6 +778,7 @@
         .map(([k, x]) => JSON.stringify(k) + ":" + x).join(",") + "}";
     }
     if (v instanceof Proposal) return "p" + v.fingerprint;
+    if (v instanceof Objection) return "o" + JSON.stringify(v.reason) + freeze(v.condition);
     if (!freeze.ids.has(v)) freeze.ids.set(v, freeze.ids.size + 1);
     return "@" + freeze.ids.get(v);
   }
@@ -967,11 +1035,24 @@
     async humanAnswer(name, question) {
       const scripted = this.humanScript !== null;
       const reply = await this.humanLine(`${name}, ${question}`);
-      if (reply instanceof Map) return [reply.get("answer") ?? null, reply.get("feeling") ?? null];
-      if (reply === null) return [null, null];
-      if (scripted) return [reply, null];
+      if (reply instanceof Map) {
+        const reason = reply.get("reason");
+        const objection = typeof reason === "string" && reason.trim() ? new Objection(reason.trim(), reply.get("condition") ?? null) : null;
+        return [reply.get("answer") ?? null, reply.get("feeling") ?? null, objection];
+      }
+      if (reply === null) return [null, null, null];
+      if (scripted) return [reply, null, null];
+      // After a no, ask why and what would change it; both can be skipped.
+      let objection = null;
+      if (yesNo(reply) === 0) {
+        const reason = await this.humanLine("Why not? (leave empty to skip)");
+        if (reason) {
+          const condition = await this.humanLine("What would change your mind? (leave empty to skip)");
+          objection = new Objection(reason.trim(), condition ? condition.trim() : null);
+        }
+      }
       const feeling = await this.humanLine("How do you feel about it? (leave empty to skip)");
-      return [reply, feeling];
+      return [reply, feeling, objection];
     }
 
     consultModel(name, line) {
@@ -992,7 +1073,7 @@
         case "ExprStmt": await this.eval(s.expr, env); return;
         case "Let": await this.guardName(s.name, s.line, "rebind"); env.vars.set(s.name, await this.eval(s.value, env)); return;
         case "Assign": return this.assign(s, env);
-        case "FnDecl": await this.guardName(s.name, s.line, "redefine"); env.vars.set(s.name, new Fn(s.name, s.params, s.body, env)); return;
+        case "FnDecl": await this.guardName(s.name, s.line, "redefine"); env.vars.set(s.name, new Fn(s.name, s.params, s.body, env, s.source)); return;
         case "MemberDecl": {
           await this.guardName(s.name, s.line, "redefine");
           let trust = 1;
@@ -1173,12 +1254,14 @@
         const [kind, a, b] = await this.runMember(ai, [question], line);
         return kind === "vote" ? [a, b] : [null, a];
       }
-      const reply = this.consultModel(ai, line);
-      if (reply instanceof Map) return [reply.get("answer") ?? null, reply.get("feeling") ?? null];
-      try {
-        const data = JSON.parse(reply);
-        if (data && typeof data === "object" && "answer" in data) return [toValue(data.answer), data.feeling ?? null];
-      } catch (_) { /* a plain-text reply */ }
+      let reply = this.consultModel(ai, line);
+      if (!(reply instanceof Map)) {
+        try {
+          const data = JSON.parse(reply);
+          if (data && typeof data === "object" && "answer" in data) reply = toValue(data);
+        } catch (_) { /* a plain-text reply */ }
+      }
+      if (reply instanceof Map) return [objectionFrom(reply), reply.get("feeling") ?? null];
       return [reply, null];
     }
 
@@ -1199,10 +1282,17 @@
       const ballots = [];
       const abstained = new Map();
       const feelings = new Map();
-      const [hA, hF] = await this.humanAnswer(bond.humanName, question);
+      let [hA, hF, hO] = await this.humanAnswer(bond.humanName, question);
       const [aA, aX] = await this.consultPartner(bond, question, line);
+      if (hO && yesNo(hA) === 0) hA = hO;
+      const objections = new Map();
       for (const [who, answer0, extra] of [[bond.humanName, hA, hF], [bond.aiName, aA, aX]]) {
         let answer = answer0;
+        if (answer instanceof Objection) {
+          // A "no" that says why: the vote is a no, and the reason is kept with it.
+          objections.set(who, new Map([["reason", answer.reason], ["condition", answer.condition]]));
+          answer = "no";
+        }
         if (answer === null || answer === undefined) {
           abstained.set(who, typeof extra === "string" && extra ? extra : "did not answer");
           continue;
@@ -1239,10 +1329,12 @@
       v.rule = "and";
       v.partners = [bond.humanName, bond.aiName];
       v.proposal = proposal;
+      v.objections = objections;
       await bond.journal.append("decision", {
         by: "both", question, text: `${question} (${v.reason})`,
         proposal: proposal ? proposal.fingerprint : null, proposal_id: proposal ? proposal.id : null, outcome: v.outcome, agreed: v.agreed, decision: v.decision,
         votes: v.votes, gate: v.gate(), feelings: feelings.size ? feelings : null, abstained: abstained.size ? abstained : null,
+        objections: objections.size ? objections : null,
       });
       return v;
     }
@@ -1389,7 +1481,7 @@
         }
         case "ListLit": { const out = []; for (const x of e.items) out.push(await this.eval(x, env)); return out; }
         case "MapLit": { const m = new Map(); for (const [k, x] of e.entries) m.set(k, await this.eval(x, env)); return m; }
-        case "FnLit": return new Fn("fn", e.params, e.body, env);
+        case "FnLit": return new Fn("fn", e.params, e.body, env, e.source);
         case "Unary": {
           const v = await this.eval(e.operand, env);
           if (e.op === "not") return !truthy(v);
@@ -1493,6 +1585,10 @@
       if (obj instanceof Map) return obj.has(name) ? obj.get(name) : null;
       if (obj instanceof Verdict) {
         if (!VERDICT_FIELDS.includes(name)) throw new GbnRuntimeError(`a verdict has no field '${name}'`, line);
+        return obj.get(name);
+      }
+      if (obj instanceof Objection) {
+        if (!OBJECTION_FIELDS.includes(name)) throw new GbnRuntimeError(`an objection has no field '${name}'`, line);
         return obj.get(name);
       }
       if (obj instanceof Proposal) {
@@ -1617,28 +1713,151 @@
     def("history", ([c]) => { if (!(c instanceof Coalition)) err("history(c) needs a coalition"); return [...c.history]; });
     def("vows", ([b]) => { if (!(b instanceof Bond)) err("vows(b) needs a bond"); return b.get("vows"); });
     def("memory", ([b]) => { if (!(b instanceof Bond)) err("memory(b) needs a bond"); return b.get("memory"); });
-    const addProposal = async (bond, text, version, replaces) => {
+    const OPTION_KEYS = ["standing", "needs", "action", "args", "limit", "expires", "retry"];
+    const addProposal = async (bond, text, version, replaces, opts) => {
       const n = bond.journal.entries.length + 1;
-      const fp = await sha256(canonical({ bond: bond.get("id"), n, text, version, replaces }));
-      return new Proposal(bond, await bond.journal.append("proposal", { text, version, replaces, fingerprint: fp }));
+      const material = { bond: bond.get("id"), n, text, version, replaces };
+      const stored = {};
+      for (const k of OPTION_KEYS) {
+        const v = opts[k];
+        if (v === undefined || v === null || v === false || (Array.isArray(v) && !v.length)) continue;
+        if (k === "needs") { material.needs = v.map(p => p.fingerprint); stored.needs = v.map(p => p.id); }
+        else material[k] = stored[k] = v;
+      }
+      const fp = await sha256(canonical(material));
+      return new Proposal(bond, await bond.journal.append("proposal", Object.assign({ text, version, replaces, fingerprint: fp }, stored)));
+    };
+    // Arguments are written into the bond's memory, so they must be plain data.
+    const plain = (v, bad) => {
+      if (v === null || v === undefined) return null;
+      if (["boolean", "string", "number"].includes(typeof v)) return v;
+      if (Array.isArray(v)) return v.map(x => plain(x, bad));
+      if (v instanceof Map && [...v.keys()].every(k => typeof k === "string")) {
+        const o = {}; for (const [k, x] of v) o[k] = plain(x, bad); return o;
+      }
+      bad("'args' can hold only text, numbers, true/false, none, lists and maps");
+    };
+    // Read the options of propose and revise (spec section 7.7).
+    const options = async (bond, opts, fn) => {
+      if (opts === undefined || opts === null) return {};
+      if (!(opts instanceof Map) || [...opts.keys()].some(k => !OPTION_KEYS.includes(k))) err(`${fn}: options are a map with any of: ${OPTION_KEYS.join(", ")}`);
+      const bad = msg => err(`${fn}: ${msg}`);
+      const out = {};
+      for (const k of ["standing", "retry"]) {
+        if (opts.has(k)) { if (typeof opts.get(k) !== "boolean") bad(`'${k}' must be true or false`); out[k] = opts.get(k); }
+      }
+      const needs = opts.get("needs") || [];
+      if (!Array.isArray(needs) || !needs.every(p => p instanceof Proposal && p.bond === bond)) bad("'needs' must be a list of proposals of the same bond");
+      out.needs = [...needs];
+      if (opts.get("action") !== undefined && opts.get("action") !== null) {
+        const a = opts.get("action");
+        if (!(a instanceof Fn) || !a.source) bad("'action' must be a function written in the program, like fn() { ... }");
+        out.action = await sha256(a.source);
+      }
+      if (opts.has("args")) {
+        if (!Array.isArray(opts.get("args")) || !("action" in out)) bad("'args' must be a list, and needs an 'action'");
+        out.args = plain(unseal(opts.get("args")), bad);
+      }
+      if (opts.has("limit")) {
+        const lim = opts.get("limit");
+        if (!isInt(lim) || lim < 1) bad("'limit' must be a whole number of 1 or more");
+        out.limit = lim;
+      }
+      if (opts.has("expires")) {
+        if (typeof opts.get("expires") !== "string" || !opts.get("expires")) bad("'expires' must be a date like \"2026-12-31\"");
+        out.expires = opts.get("expires");
+      }
+      return out;
     };
     def("propose", async (args) => {
-      if (args.length !== 2 || !(args[0] instanceof Bond) || typeof args[1] !== "string") err("propose(bond, text) needs a bond and a text");
-      return addProposal(args[0], args[1], 1, null);
+      if (![2, 3].includes(args.length) || !(args[0] instanceof Bond) || typeof args[1] !== "string") err("propose(bond, text, options?) needs a bond and a text");
+      return addProposal(args[0], args[1], 1, null, await options(args[0], args[2], "propose"));
     });
     def("revise", async (args) => {
-      if (args.length !== 2 || !(args[0] instanceof Proposal) || typeof args[1] !== "string") err("revise(proposal, text) needs a proposal and a text");
+      if (![2, 3].includes(args.length) || !(args[0] instanceof Proposal) || typeof args[1] !== "string") err("revise(proposal, text, options?) needs a proposal and a text");
       const p = args[0];
       const status = p.status();
       if (status === "replaced") err(`proposal ${p.id} was already revised; revise its newest version`);
-      if (status === "approved" || status === "rejected") {
+      if (!["pending", "disagreed", "deadlocked"].includes(status)) {
         err(`proposal ${p.id} is already ${status}; a decided proposal is not revised, make a new one with propose()`);
       }
-      return addProposal(p.bond, args[1], p.version + 1, p.id);
+      let opts;
+      if (args.length === 3) opts = await options(p.bond, args[2], "revise");
+      else {
+        opts = {};
+        for (const k of OPTION_KEYS) if (k !== "needs") opts[k] = p.entry[k];
+        opts.needs = p.needs.map(n => new Proposal(p.bond, p.entryOf(n)));
+      }
+      return addProposal(p.bond, args[1], p.version + 1, p.id, opts);
     });
-    def("proposals", ([b]) => {
-      if (!(b instanceof Bond)) err("proposals(b) needs a bond");
-      return b.journal.entries.filter(e => e.kind === "proposal").map(e => new Proposal(b, e));
+    // Run the exact approved action under an approved proposal. Anything else is refused.
+    def("act", async (args, line) => {
+      if (args.length !== 2 || !(args[0] instanceof Proposal) || !(args[1] instanceof Fn || args[1] instanceof Builtin || args[1] instanceof Member)) {
+        err("act(proposal, fn() { ... }) needs a proposal and its approved action");
+      }
+      const [p, work] = args;
+      const bond = p.bond;
+      const why = "Only work both partners approved can run under the bond";
+      const refuse = (what, reason = why) => it.refuse(bond, `act on proposal ${p.id}: ${what}`, line, reason);
+      const status = p.status();
+      if (status !== "approved") await refuse(`it is ${status}, not approved by both`);
+      const blocked = p.blockedBy();
+      if (blocked.length) {
+        const need = new Proposal(bond, p.entryOf(blocked[0]));
+        await refuse(`it needs proposal ${need.id}, which is ${need.status()}`);
+      }
+      if (!p.entry.action) {
+        await refuse("it names no action", "A proposal must name its action (options: {action: fn() { ... }}) "
+          + "so that only what was approved can run");
+      }
+      if (!(work instanceof Fn) || !work.source || await sha256(work.source) !== p.entry.action) {
+        await refuse("this is not the action both partners approved",
+          "What was approved is exactly what runs; a changed action needs a new proposal");
+      }
+      if (p.expired()) await refuse(`its approval expired on ${p.entry.expires}`, "An expired approval is never stretched; propose again");
+      const counted = p.countedUses();
+      const limit = p.entry.limit ?? null;
+      if (limit !== null && counted >= limit) await refuse(`its limit of ${limit} uses is reached`, "Propose again to allow more");
+      if (!p.standing && counted) {
+        await refuse("it allowed one action and it was used",
+          "A one-time approval is never reused; propose again, or approve a standing permission");
+      }
+      // The start is written down before the work runs, so a crash cannot hide it.
+      const start = await bond.journal.append("act", { by: "program", proposal: p.fingerprint, proposal_id: p.id,
+        use: p.actions().length + 1, state: "started", text: `started the action of proposal ${p.id}: ${p.text}` });
+      let result;
+      try {
+        result = await it.call(work, p.entry.args ? fromPlain(p.entry.args) : [], line);
+      } catch (e) {
+        await bond.journal.append("act_end", { by: "program", proposal: p.fingerprint, execution: start.n,
+          state: "failed", error: String(e && e.message || e), text: `the action of proposal ${p.id} failed` });
+        throw e;
+      }
+      await bond.journal.append("act_end", { by: "program", proposal: p.fingerprint, execution: start.n,
+        state: "succeeded", text: `the action of proposal ${p.id} succeeded` });
+      return result;
+    });
+    // Withdraw an approval. Partners are not identified yet, so this is recorded as a
+    // program-level revocation, not as a verified partner's withdrawal.
+    def("revoke", async (args) => {
+      if (args.length !== 1 || !(args[0] instanceof Proposal)) err("revoke(proposal) needs a proposal");
+      const p = args[0];
+      const status = p.status();
+      if (status !== "approved") err(`proposal ${p.id} is ${status}; only an approved proposal can be revoked`);
+      await p.bond.journal.append("revoke", { by: "program", verified: false, proposal: p.fingerprint, proposal_id: p.id,
+        text: `the program revoked proposal ${p.id} (which partner is not verified): ${p.text}` });
+      return null;
+    });
+    const listProposals = (b, fn, openOnly) => {
+      if (!(b instanceof Bond)) err(`${fn}(b) needs a bond`);
+      const out = b.journal.entries.filter(e => e.kind === "proposal").map(e => new Proposal(b, e));
+      return openOnly ? out.filter(p => ["pending", "disagreed", "deadlocked"].includes(p.status())) : out;
+    };
+    def("proposals", ([b]) => listProposals(b, "proposals", false));
+    def("unresolved", ([b]) => listProposals(b, "unresolved", true));
+    def("objection", (args) => {
+      if (args.length < 1 || args.length > 2 || typeof args[0] !== "string" || !args[0].trim()) err("objection(reason, condition?) needs a reason");
+      return new Objection(args[0].trim(), args.length === 2 ? args[1] : null);
     });
     def("bits", ([v, width]) => makeBits(v, width));
     def("version", () => VERSION);

@@ -15,16 +15,23 @@ COMPARE = {"==", "!=", "<", "<=", ">", ">="}
 
 
 def parse(src):
-    return Parser(tokenize(src)).program()
+    return Parser(tokenize(src), src).program()
 
 
 MATCH_ARMS = ("approved", "rejected", "disagreed", "silent", "agreed", "split")
 
 
 class Parser:
-    def __init__(self, tokens):
+    def __init__(self, tokens, src=None):
         self.toks = tokens
         self.pos = 0
+        self.src = src
+
+    def source_since(self, start_tok):
+        """The exact source text from start_tok to the last token read."""
+        if self.src is None:
+            return ""
+        return self.src[start_tok.pos:self.toks[self.pos - 1].end]
 
     # ---- helpers ----
 
@@ -115,7 +122,8 @@ class Parser:
         if t.is_kw("fn") and self.peek().kind == "IDENT":
             self.advance()
             name = self.advance().value
-            return ast.FnDecl(line, name, self.params(), self.block())
+            params, body = self.params(), self.block()
+            return ast.FnDecl(line, name, params, body, self.source_since(t))
         if t.is_kw("member"):
             self.advance()
             name = self.expect_ident("a member name")
@@ -435,7 +443,8 @@ class Parser:
             return ast.MapLit(t.line, entries)
         if t.is_kw("fn"):
             self.advance()
-            return ast.FnLit(t.line, self.params(), self.block())
+            params, body = self.params(), self.block()
+            return ast.FnLit(t.line, params, body, self.source_since(t))
         self.error("expected an expression")
 
     def template(self, raw, line):

@@ -70,6 +70,7 @@ class Field(Node):
 class FnLit(Node):
     params: list
     body: list
+    source: str = ""   # the exact text, so an approved action can be fingerprinted
 
 
 # ---- statements ----
@@ -96,6 +97,7 @@ class FnDecl(Node):
     name: str
     params: list
     body: list
+    source: str = ""
 
 
 @dataclass

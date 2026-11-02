@@ -24,6 +24,8 @@ class Token:
     kind: str  # NUMBER STRING IDENT KEYWORD OP EOF
     value: object
     line: int
+    pos: int = 0   # where the token starts in the source
+    end: int = 0   # where it ends
 
     def is_op(self, *ops):
         return self.kind == "OP" and self.value in ops
@@ -39,6 +41,7 @@ def tokenize(src, line=1):
     tokens = []
     i, n = 0, len(src)
     while i < n:
+        start, before = i, len(tokens)
         ch = src[i]
         if ch == "\n":
             line += 1
@@ -108,5 +111,7 @@ def tokenize(src, line=1):
             i += 1
         else:
             raise GbnSyntaxError(f"unexpected character {ch!r}", line)
-    tokens.append(Token("EOF", None, line))
+        if len(tokens) > before:
+            tokens[-1].pos, tokens[-1].end = start, i
+    tokens.append(Token("EOF", None, line, n, n))
     return tokens

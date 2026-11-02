@@ -20,6 +20,10 @@ Files use the extension `.gbn` and are UTF-8 text.
    the decision.
 6. **Independent voices.** Members of a coalition cannot see or change each other's
    inputs, and one member's failure is an abstention, not a crash.
+7. **Continuity.** Disagreement blocks only what is disputed. It never suspends the bond,
+   erases earlier agreements, or stops independent work both partners already approved.
+   A deadlock is recorded and can be revisited, and it never turns into consent through
+   silence, repetition, time or one partner acting alone (section 7.7).
 
 ## 2. Lexical structure
 
@@ -53,6 +57,7 @@ Files use the extension `.gbn` and are UTF-8 text.
 | `bond` | `bond us { ... }` | calling it returns a verdict |
 | `verdict` | | the outcome of a coalition or bond |
 | `proposal` | `propose(us, "text")` | something a bond decides on, with its own fingerprint (section 7.6) |
+| `objection` | `objection("why", "unless")` | a no that gives its reason (section 7.7) |
 
 Falsy values: `false`, `none`, `0`, bits that are all 0, `""`, `[]`, `{}`. Everything else is truthy.
 `==` compares by value (lists and maps deeply).
@@ -239,7 +244,10 @@ is written into the bond's memory as a `refused` entry.
 - setting any field of the bond (`us.human = ...`);
 - changing a vow, or anything inside a vow's value;
 - changing the memory or anything inside it;
-- asking a proposal that is already approved, rejected or replaced (section 7.6).
+- asking a proposal that is already approved, rejected or replaced (section 7.6);
+- acting on a proposal that is not approved, whose needs are not approved, that names no
+  action or a different one, that expired, that reached its limit, or whose one-time
+  approval was already used (section 7.7).
 
 ### 7.5 Kept bonds
 
@@ -269,8 +277,11 @@ let p2 = revise(p, "Ship version 2 after the tests pass")   # version 2, a new p
 for q in proposals(us) { print(q) }          # every proposal, also from earlier runs
 ```
 
-- `propose(bond, text)` writes a `proposal` entry and returns the proposal. Its
-  **fingerprint** is the SHA-256 of `{bond, n, text, version, replaces}` written as
+- `propose(bond, text, options?)` writes a `proposal` entry and returns the proposal.
+  The options are `standing`, `needs`, `action`, `args`, `limit`, `expires` and `retry`
+  (section 7.7). Its **fingerprint** is the SHA-256 of `{bond, n, text, version,
+  replaces}` (plus every option given, with the needed proposals' fingerprints as
+  `needs` and the action's hash as `action`) written as
   canonical JSON (sorted keys, no spaces), where `bond` is the bond's `id` and `n` is
   the proposal's entry number. A bond's `id` (`us.id`) is the hash of the entry that
   formed it, so two bonds with the same name still give different fingerprints.
@@ -285,19 +296,105 @@ for q in proposals(us) { print(q) }          # every proposal, also from earlier
   made in one run can be answered in a later one.
 
 A proposal's fields are `id`, `version`, `text`, `fingerprint`, `replaces`, `bond`,
-`rounds` (how many times it was asked) and `status`, which is read from memory each time:
+`rounds` (how many times it was asked), `status`, and the continuity fields of section
+7.7: `standing`, `needs`, `objections`, `uses`, `actions`, `blocked_by`, `ready`,
+`action`, `args`, `limit`, `expires` and `retry`. The status is
+read from memory each time:
 
 | Status | Meaning |
 | --- | --- |
 | `pending` | not decided yet: never asked, or only met with silence |
 | `disagreed` | the last time it was asked, the partners answered differently; it can be asked again |
+| `deadlocked` | the last round disagreed, and 3 or more rounds disagreed in all (not necessarily in a row); open, and flagged for review |
 | `approved` | both said yes; final |
 | `rejected` | both said no; final |
 | `replaced` | a newer version exists; final |
+| `revoked` | it was approved, and the approval was later withdrawn; final |
 
 Asking a proposal that is `approved`, `rejected` or `replaced` is refused like an
 overwrite: a decided proposal stays decided, and an old version is never reused.
 Silence and disagreement never close a proposal, so it can wait as long as needed.
+
+### 7.7 Continuity
+
+Two partners have no majority, so a disagreement could stall everything. Gatbandhan
+keeps the disputed question blocked and lets everything else carry on.
+
+**Objections.** A no can say why and what would change it. An AI member returns
+`objection("The backup is not tested", "Test a restore first")`; a model may add
+`"reason"` and `"condition"` to its JSON; a scripted human gives
+`{answer: "no", reason: "...", condition: "..."}`, and at the terminal the human is asked
+"Why not?" and "What would change your mind?" after a no (both can be skipped). An
+objection always counts as a no. A reason given with a yes is ignored, so a reason can
+never turn a yes into a no. Objections are kept in the verdict's `objections` field, in
+the decision's memory entry, and in the proposal's `objections` list
+(`{round, by, reason, condition}`).
+
+**Open decisions.** `unresolved(bond)` lists the proposals that are still `pending`,
+`disagreed` or `deadlocked`. Once 3 rounds in all have disagreed (rounds of silence in
+between do not reset the count), a proposal whose last round disagreed is `deadlocked`: a
+signal to talk, add evidence, or revise it, never a decision. Asking it again is allowed,
+and only a yes from both approves it.
+
+**Approved work, and only approved work.** A proposal that allows work names the exact
+work: `{action: fn() { ... }}`. The bond stores the SHA-256 of the function's source text
+(from `fn` to its closing `}`, exactly as written) as the proposal's `action`, so the
+partners approve this exact action. `act(proposal, work)` runs `work` only when it is that
+same action, with the arguments approved in `args` (a list of plain data: text, numbers,
+true/false, none, lists and maps). Anything else is refused, remembered and stops the
+program:
+
+- acting on a proposal that is not `approved` (pending, disagreed, deadlocked, rejected,
+  replaced or revoked);
+- acting on a proposal whose `needs` are not all approved;
+- acting on a proposal that names no action;
+- acting with a function that is not the approved one, even if it differs by one space;
+- acting after the approval's `expires` date (`"2026-12-31"`: the date and time now,
+  shortened to the same length, is later than it);
+- acting when `limit` actions have already counted against the approval;
+- acting a second time on a one-time proposal.
+
+```gbn
+let run_tests = fn() { print("all pass") }
+let deploy = fn(where) { print("deploying to", where) }
+let tests = propose(us, "Run the tests whenever code changes",
+                    {standing: true, action: run_tests, limit: 50, expires: "2026-12-31"})
+let migrate = propose(us, "Migrate the database")
+let release = propose(us, "Release version 2", {needs: [migrate], action: deploy, args: ["staging"]})
+act(tests, run_tests)
+```
+
+A proposal is one-time unless it is `standing: true`, which approves the same action
+running many times, within its `limit` and before it `expires` when those are given.
+`needs` lists proposals that must be approved first, so a disputed proposal blocks only
+the work that depends on it: above, the tests keep running while the migration is
+disputed, and only the release waits. `blocked_by` lists the needs that are not approved
+yet, `uses` counts the actions started so far, and `ready` says whether `act` would run
+now. `revise` keeps every option unless new options are given. A need names one exact
+version: if that proposal is replaced, the work that needed it stays blocked until it is
+proposed again naming the new version.
+
+**Every action is recorded from start to end.** Before the work runs, an `act` entry
+(`state: "started"`) is written; after it, an `act_end` entry names that start in
+`execution` and says `succeeded` or `failed` (with the `error`). A start with no end means
+the program stopped part-way, and its state is `unknown`. A proposal's `actions` lists
+them all (`{id, state}`). Every started action counts against the approval, except that
+with `retry: true` a failed one does not, so a failed action may be tried again. Use
+`retry` only for work that is safe to repeat. An `unknown` action always counts, because
+it may have done its work.
+
+**What the action hash does not cover.** The hash covers the function's own text. Values
+the function reads from outside it (variables of the program around it) are not part of
+the approval, so whatever the action depends on should come in through `args`.
+
+**Withdrawing.** `revoke(proposal)` withdraws an approval and writes a `revoke` entry.
+Consent needs both partners, so either one may withdraw it alone. Partners are not yet
+identified by signatures, so the entry is recorded as the program's (`by: "program"`,
+`verified: false`), never as a verified partner's withdrawal. Past actions stay in memory;
+no future action runs under it.
+
+**Outside the bond.** The human can always act outside Gatbandhan with ordinary tools.
+Such work is not recorded as a joint decision, and nothing may claim it was.
 
 ## 8. Verdicts
 
@@ -306,6 +403,7 @@ Silence and disagreement never close a proposal, so it can wait as long as neede
 | `outcome` | for a bond: `approved`, `rejected`, `disagreed` or `silent`; for a coalition: `agreed` or `split` |
 | `approved` | for a bond, true only when both said yes to the same thing; for a coalition, the same as `agreed` |
 | `proposal` | for a bond asked a proposal, that proposal; otherwise `none` |
+| `objections` | for a bond, map of partner to `{reason, condition}` for each no that gave a reason |
 | `agreed` | whether a decision was reached (for a bond: whether the answers match, so a mutual rejection is agreed but not approved) |
 | `decision` | the decided answer, or `none` |
 | `reason` | why, for example `majority`, `vetoed by m`, `both approve` |
@@ -361,7 +459,9 @@ an offline model that gives the replies in order. A model whose name starts with
 `claude` is called through the Anthropic Messages API when `ANTHROPIC_API_KEY` is set.
 
 Bonds and coalitions: `vows(bond)`, `memory(bond)`, `propose(bond, text)`,
-`revise(proposal, text)`, `proposals(bond)` (section 7.6), `trust(coalition)`,
+`revise(proposal, text, options?)`, `proposals(bond)` (section 7.6), `unresolved(bond)`,
+`act(proposal, fn)`, `revoke(proposal)`, `objection(reason, condition?)` (section 7.7),
+`trust(coalition)`,
 `history(coalition)`.
 
 ## 10. Errors
